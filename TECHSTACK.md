@@ -7,7 +7,7 @@
 
 ## 1. Executive Summary & Design Principles
 
-Sistem ini dirancang sebagai aplikasi *background utility* Windows yang ringan, hemat daya, dan responsif. Berdasarkan kebutuhan pada [PRD.md](file:///C:/Users/Adam%20Arfa/Documents/Project/Notch/PRD.md), arsitektur mengutamakan:
+Sistem ini dirancang sebagai aplikasi *background utility* Windows yang ringan, hemat daya, dan responsif. Berdasarkan kebutuhan pada [PRD.md](./PRD.md), arsitektur mengutamakan:
 1. **Zero-Disk Clutter / Volatile RAM**: Semua item clipboard dan staging sementara disimpan hanya di memori (RAM), hilang otomatis saat aplikasi ditutup/reboot.
 2. **Minimal Footprint**: Target penggunaan RAM idle < 50 MB (menghindari bloatware Electron).
 3. **Fluid Micro-Interactions**: UI bergaya *Dynamic Island* dengan animasi elastis (*spring physics*) yang mulus.

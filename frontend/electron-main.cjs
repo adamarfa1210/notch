@@ -160,6 +160,14 @@ function createNotchWindow() {
   positionWindow(initialWidth, initialHeight);
   mainWindow.show();
 
+  // Security guard: strictly deny external navigation or unexpected window popups
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  mainWindow.webContents.on("will-navigate", (event, navigationUrl) => {
+    if (!navigationUrl.startsWith("file://")) {
+      event.preventDefault();
+    }
+  });
+
   // Load the built frontend HTML
   const distPath = path.join(__dirname, "dist", "index.html");
   console.log("[Electron] Loading Notch UI from:", distPath);
