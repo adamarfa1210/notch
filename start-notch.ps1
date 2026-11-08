@@ -12,11 +12,15 @@ if (-not (Get-Process -Name "notch-daemon" -ErrorAction SilentlyContinue)) {
     Write-Host "[1/2] Rust Backend Daemon is already running." -ForegroundColor Gray
 }
 
-$electronExe = "$PSScriptRoot\frontend\node_modules\electron\dist\electron.exe"
-$mainCjs = "$PSScriptRoot\frontend\electron-main.cjs"
+$frontendDir = "$PSScriptRoot\frontend"
+$electronCmd = "$frontendDir\node_modules\.bin\electron.cmd"
 
 Write-Host "[2/2] Launching Native Floating Notch Window..." -ForegroundColor Green
-Start-Process -FilePath $electronExe -ArgumentList "`"$mainCjs`""
+if (Test-Path $electronCmd) {
+    Start-Process -FilePath $electronCmd -ArgumentList "electron-main.cjs" -WorkingDirectory $frontendDir
+} else {
+    Start-Process -FilePath "npx" -ArgumentList "electron electron-main.cjs" -WorkingDirectory $frontendDir
+}
 
 Write-Host "=====================================================" -ForegroundColor Cyan
 Write-Host "  Notch is now active on your desktop screen!        " -ForegroundColor Green

@@ -17,7 +17,11 @@ if "%ERRORLEVEL%"=="0" (
 REM 2. Launch Native Floating Desktop Notch Window
 echo [2/2] Launching Native Floating Notch Window...
 cd /d "%~dp0frontend"
-start "" "%~dp0frontend\node_modules\electron\dist\electron.exe" "%~dp0frontend\electron-main.cjs"
+if exist "node_modules\.bin\electron.cmd" (
+    start "" "node_modules\.bin\electron.cmd" electron-main.cjs
+) else (
+    start "" npx electron electron-main.cjs
+)
 echo.
 echo ========================================================
 echo   Notch is now active!
