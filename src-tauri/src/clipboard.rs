@@ -10,6 +10,8 @@ use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
 
+pub type OnUpdateCallback = Arc<dyn Fn() + Send + Sync + 'static>;
+
 pub struct ClipboardMonitor {
     running: Arc<AtomicBool>,
 }
@@ -21,9 +23,8 @@ impl ClipboardMonitor {
         }
     }
 
-    pub fn start(&self, buffer: Arc<FifoBuffer>, poll_interval_ms: u64) {
+    pub fn start(&self, buffer: Arc<FifoBuffer>, poll_interval_ms: u64, on_update: Option<OnUpdateCallback>) {
         if self.running.swap(true, Ordering::SeqCst) {
-            // Already running
             return;
         }
 
@@ -50,6 +51,9 @@ impl ClipboardMonitor {
                             last_hash = hash;
                             let id = Uuid::new_v4().to_string();
                             buffer.push(StagedItem::new_text(id, trimmed.to_string()));
+                            if let Some(ref cb) = on_update {
+                                cb();
+                            }
                             thread::sleep(Duration::from_millis(poll_interval_ms));
                             continue;
                         }
@@ -63,6 +67,9 @@ impl ClipboardMonitor {
                         last_hash = hash;
                         if let Some(staged) = convert_image_to_staged(img) {
                             buffer.push(staged);
+                            if let Some(ref cb) = on_update {
+                                cb();
+                            }
                         }
                     }
                 }
@@ -87,7 +94,6 @@ fn calculate_image_hash(img: &ImageData) -> u64 {
     let mut s = DefaultHasher::new();
     img.width.hash(&mut s);
     img.height.hash(&mut s);
-    // Sample first and last 256 bytes for fast hashing
     let bytes = &img.bytes;
     if bytes.len() > 512 {
         bytes[..256].hash(&mut s);

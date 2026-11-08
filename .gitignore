@@ -1,3 +1,6 @@
 /target
+src-tauri/target
 Cargo.lock
+frontend/node_modules
+frontend/dist
 **/*.rs.bk

@@ -29,7 +29,7 @@ fn main() {
 
     // 1. Start Clipboard Monitor
     let clipboard_monitor = ClipboardMonitor::new();
-    clipboard_monitor.start(Arc::clone(&buffer), CLIPBOARD_POLL_MS);
+    clipboard_monitor.start(Arc::clone(&buffer), CLIPBOARD_POLL_MS, None);
     println!("[Daemon] Clipboard monitor initialized.");
 
     // 2. Start Embedded HTTP Server
