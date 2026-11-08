@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, Image as ImageIcon, File, X, Trash2, Plus } from "lucide-react";
+import { FileText, File, X, Trash2, Plus } from "lucide-react";
 
 export interface StagedItem {
   id: string;
@@ -13,18 +13,25 @@ export interface StagedItem {
 
 const HTTP_API = "http://127.0.0.1:49152";
 
-// Helper for Electron IPC if running under Electron
-const electron = (window as any).require ? (window as any).require("electron") : null;
+// Safe Electron IPC extraction
+let ipcRenderer: any = null;
+if (typeof window !== "undefined" && (window as any).require) {
+  try {
+    ipcRenderer = (window as any).require("electron").ipcRenderer;
+    console.log("[Notch] Electron IPC renderer connected.");
+  } catch (e) {
+    console.warn("[Notch] Electron IPC not available:", e);
+  }
+}
 
 export default function App() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [items, setItems] = useState<StagedItem[]>([]);
-  const isTauriRef = useRef(false);
 
-  // 1. Initialize & Poll Data
+  // 1. Initial Data Fetch & Fast Polling
   useEffect(() => {
     fetchFromHttp();
-    const interval = setInterval(fetchFromHttp, 500);
+    const interval = setInterval(fetchFromHttp, 400);
     return () => clearInterval(interval);
   }, []);
 
@@ -43,15 +50,15 @@ export default function App() {
   // 2. Expand / Collapse Window States
   const expandNotch = () => {
     setIsExpanded(true);
-    if (electron?.ipcRenderer) {
-      electron.ipcRenderer.send("set-notch-state", "expanded");
+    if (ipcRenderer) {
+      ipcRenderer.send("set-notch-state", "expanded");
     }
   };
 
   const collapseNotch = () => {
     setIsExpanded(false);
-    if (electron?.ipcRenderer) {
-      electron.ipcRenderer.send("set-notch-state", "collapsed");
+    if (ipcRenderer) {
+      ipcRenderer.send("set-notch-state", "collapsed");
     }
   };
 
@@ -84,7 +91,6 @@ export default function App() {
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const files = Array.from(e.dataTransfer.files);
       for (const file of files) {
-        // In desktop wrapper (Electron), file.path has the full local OS path
         const filePath = (file as any).path || file.name;
         await postItem("file", filePath);
       }
@@ -108,7 +114,7 @@ export default function App() {
         body: JSON.stringify({ item_type: itemType, content }),
       });
     } catch (err) {
-      console.error("Failed to post item to backend:", err);
+      console.error("[Notch] Failed to post item to backend:", err);
     }
   };
 
@@ -119,7 +125,7 @@ export default function App() {
       await fetch(`${HTTP_API}/api/items/${id}`, { method: "DELETE" });
       fetchFromHttp();
     } catch (err) {
-      console.error("Failed to delete item:", err);
+      console.error("[Notch] Failed to delete item:", err);
     }
   };
 
@@ -129,7 +135,7 @@ export default function App() {
       await fetch(`${HTTP_API}/api/items/clear`, { method: "POST" });
       fetchFromHttp();
     } catch (err) {
-      console.error("Failed to clear buffer:", err);
+      console.error("[Notch] Failed to clear buffer:", err);
     }
   };
 
@@ -138,28 +144,15 @@ export default function App() {
 
   return (
     <div
-      className="w-screen h-screen flex justify-center items-start overflow-hidden pointer-events-none select-none"
+      className="w-full h-full flex justify-center items-start overflow-hidden select-none bg-transparent"
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <motion.div
-        className="pointer-events-auto bg-[#0B0F19]/95 text-white backdrop-blur-md shadow-2xl border-x border-b border-sky-500/30 overflow-hidden flex flex-col items-center justify-between cursor-pointer"
-        initial="collapsed"
-        animate={isExpanded ? "expanded" : "collapsed"}
-        variants={{
-          collapsed: {
-            width: 140,
-            height: 12,
-            borderRadius: "0px 0px 8px 8px",
-            transition: { type: "spring", stiffness: 400, damping: 30 },
-          },
-          expanded: {
-            width: 440,
-            height: 96,
-            borderRadius: "0px 0px 16px 16px",
-            transition: { type: "spring", stiffness: 350, damping: 25 },
-          },
+      <div
+        className="w-full h-full bg-[#0B0F19] text-white shadow-2xl border-x border-b border-sky-500/40 overflow-hidden flex flex-col items-center justify-between cursor-pointer transition-all duration-200"
+        style={{
+          borderRadius: isExpanded ? "0px 0px 16px 16px" : "0px 0px 8px 8px",
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -175,8 +168,8 @@ export default function App() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              className="w-full h-full flex items-center justify-center relative"
+              transition={{ duration: 0.1 }}
+              className="w-full h-full flex items-center justify-center relative bg-black/90"
             >
               {/* Active Volatile RAM Indicator LED */}
               <span className="relative flex h-2 w-2">
@@ -188,11 +181,11 @@ export default function App() {
             // ================= STATE B: EXPANDED SHELF =================
             <motion.div
               key="expanded-content"
-              initial={{ opacity: 0, y: -4 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.2 }}
-              className="w-full h-full p-2 flex flex-col justify-between"
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.15 }}
+              className="w-full h-full p-2 flex flex-col justify-between bg-[#0B0F19]"
             >
               {/* Header Status Bar */}
               <div className="w-full flex items-center justify-between px-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
@@ -275,7 +268,7 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
-      </motion.div>
+      </div>
     </div>
   );
 }

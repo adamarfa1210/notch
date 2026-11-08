@@ -5,7 +5,7 @@ let mainWindow = null;
 
 function createNotchWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
-  const { width: screenWidth } = primaryDisplay.workAreaSize;
+  const { width: screenWidth } = primaryDisplay.bounds;
 
   const initialWidth = 140;
   const initialHeight = 12;
@@ -22,22 +22,36 @@ function createNotchWindow() {
     skipTaskbar: true,
     resizable: false,
     hasShadow: false,
+    show: true,
+    backgroundColor: "#00000000",
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
+      backgroundThrottling: false,
     },
   });
 
+  mainWindow.setAlwaysOnTop(true, "screen-saver");
+
   // Load the built frontend HTML
   const distPath = path.join(__dirname, "dist", "index.html");
+  console.log("[Electron] Loading Notch UI from:", distPath);
   mainWindow.loadFile(distPath);
+
+  mainWindow.webContents.on("did-fail-load", (event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[Electron] Failed to load ${validatedURL}: ${errorDescription} (${errorCode})`);
+  });
+
+  mainWindow.webContents.on("console-message", (event, level, message, line, sourceId) => {
+    console.log(`[Renderer Console] ${message}`);
+  });
 
   // Dynamic window resizing for Collapsed vs Expanded notch
   ipcMain.on("set-notch-state", (event, state) => {
     if (!mainWindow) return;
 
     const display = screen.getPrimaryDisplay();
-    const currentScreenWidth = display.workAreaSize.width;
+    const currentScreenWidth = display.bounds.width;
 
     if (state === "expanded") {
       const targetWidth = 440;
@@ -65,6 +79,8 @@ function createNotchWindow() {
   mainWindow.on("closed", () => {
     mainWindow = null;
   });
+
+  console.log(`[Electron] Notch window active at X: ${initialX}, Y: 0 (${initialWidth}x${initialHeight})`);
 }
 
 // When Electron is ready
