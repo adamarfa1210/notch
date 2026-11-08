@@ -82,7 +82,12 @@ function createNotchWindow() {
       const h = typeof customHeight === "number" ? customHeight : 112;
       positionWindow(w, h);
     } else {
-      positionWindow(180, 30);
+      // Allow Framer Motion animation to shrink inside transparent canvas before tightening OS window bounds
+      setTimeout(() => {
+        if (mainWindow) {
+          positionWindow(180, 30);
+        }
+      }, 260);
     }
   });
 
@@ -91,59 +96,67 @@ function createNotchWindow() {
     positionWindow(width, height);
   });
 
-  // 2. Native OLE Drag-Out (Egress to Windows File Explorer / WhatsApp / External Apps)
-  ipcMain.on("start-drag-item", (event, item) => {
+  // 2. Native OLE Drag-Out (Supports single item or batch of multiple items)
+  ipcMain.on("start-drag-item", (event, itemOrItems) => {
     try {
-      let targetFilePath = null;
+      const items = Array.isArray(itemOrItems) ? itemOrItems : [itemOrItems];
+      const resolvedFiles = [];
+      const tempDir = path.join(os.tmpdir(), "notch_export");
 
-      if (item.item_type === "fileuri") {
-        targetFilePath = item.data;
+      for (const item of items) {
+        if (!item) continue;
+        let targetFilePath = null;
 
-        // Robust resolution for Unicode, emojis, or relative paths:
-        if (!fs.existsSync(targetFilePath)) {
-          const folderAwal = path.resolve(__dirname, "..", "testing_dragdrop", "folder_awal");
-          if (fs.existsSync(folderAwal)) {
-            const files = fs.readdirSync(folderAwal);
-            for (const f of files) {
-              if (
-                f === item.preview ||
-                f.normalize("NFC") === item.preview.normalize("NFC") ||
-                f.includes(item.preview.slice(0, 20))
-              ) {
-                targetFilePath = path.join(folderAwal, f);
-                break;
+        if (item.item_type === "fileuri") {
+          targetFilePath = item.data;
+
+          // Robust resolution for Unicode, emojis, or relative paths:
+          if (!fs.existsSync(targetFilePath)) {
+            const folderAwal = path.resolve(__dirname, "..", "testing_dragdrop", "folder_awal");
+            if (fs.existsSync(folderAwal)) {
+              const files = fs.readdirSync(folderAwal);
+              for (const f of files) {
+                if (
+                  f === item.preview ||
+                  f.normalize("NFC") === item.preview.normalize("NFC") ||
+                  f.includes(item.preview.slice(0, 20))
+                ) {
+                  targetFilePath = path.join(folderAwal, f);
+                  break;
+                }
               }
             }
           }
+        } else if (item.item_type === "image") {
+          if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+          targetFilePath = path.join(tempDir, `notch_img_${item.id.slice(0, 8)}.png`);
+          fs.writeFileSync(targetFilePath, Buffer.from(item.data, "base64"));
+        } else if (item.item_type === "text") {
+          if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+          targetFilePath = path.join(tempDir, `notch_text_${item.id.slice(0, 8)}.txt`);
+          fs.writeFileSync(targetFilePath, item.data, "utf8");
         }
-      } else if (item.item_type === "image") {
-        const tempDir = path.join(os.tmpdir(), "notch_export");
-        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-        targetFilePath = path.join(tempDir, `notch_img_${item.id.slice(0, 8)}.png`);
-        fs.writeFileSync(targetFilePath, Buffer.from(item.data, "base64"));
-      } else if (item.item_type === "text") {
-        const tempDir = path.join(os.tmpdir(), "notch_export");
-        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
-        targetFilePath = path.join(tempDir, `notch_text_${item.id.slice(0, 8)}.txt`);
-        fs.writeFileSync(targetFilePath, item.data, "utf8");
+
+        if (targetFilePath && fs.existsSync(targetFilePath)) {
+          resolvedFiles.push(path.resolve(targetFilePath));
+        }
       }
 
-      if (targetFilePath && fs.existsSync(targetFilePath)) {
-        const resolvedPath = path.resolve(targetFilePath);
-        console.log(`[Electron] Starting native OLE drag-out for: ${resolvedPath}`);
+      if (resolvedFiles.length > 0) {
+        console.log(`[Electron] Starting native OLE drag-out for ${resolvedFiles.length} item(s):`, resolvedFiles);
         const iconPath = path.join(__dirname, "drag-icon.png");
         const icon = nativeImage.createFromPath(iconPath);
         event.sender.startDrag({
-          file: resolvedPath,
-          files: [resolvedPath],
+          file: resolvedFiles[0],
+          files: resolvedFiles,
           icon: icon.isEmpty() ? iconPath : icon,
         });
-        console.log(`[Electron] Native OLE drag-out completed for: ${resolvedPath}`);
+        console.log(`[Electron] Native OLE drag-out completed for ${resolvedFiles.length} item(s).`);
         if (event.sender && !event.sender.isDestroyed()) {
-          event.sender.send("native-drag-finished", { path: resolvedPath });
+          event.sender.send("native-drag-finished", { count: resolvedFiles.length, files: resolvedFiles });
         }
       } else {
-        console.warn(`[Electron] Drag-out aborted: file does not exist on disk: "${targetFilePath}"`);
+        console.warn(`[Electron] Drag-out aborted: no valid files found on disk.`);
       }
     } catch (err) {
       console.error("[Electron] Failed to start native drag:", err);

@@ -1,6 +1,17 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, File, X, Trash2, Plus, GripVertical, Pin } from "lucide-react";
+import {
+  FileText,
+  File,
+  X,
+  Trash2,
+  Plus,
+  GripVertical,
+  Pin,
+  ListChecks,
+  Layers,
+  Check,
+} from "lucide-react";
 
 export interface StagedItem {
   id: string;
@@ -31,6 +42,8 @@ export default function App() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const [isDraggingOut, setIsDraggingOut] = useState(false);
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [items, setItems] = useState<StagedItem[]>([]);
   const leaveTimeoutRef = useRef<any>(null);
 
@@ -53,6 +66,19 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, []);
+
+  // Prune any selected IDs if those items no longer exist in buffer
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (items.some((it) => it.id === id)) {
+          next.add(id);
+        }
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [items]);
 
   async function fetchFromHttp() {
     try {
@@ -79,19 +105,20 @@ export default function App() {
   const getExpandedDimensions = (slotsCount = allSlots.length) => {
     const multi = slotsCount > 10;
     const r1 = multi ? 10 : slotsCount;
-    // Formula from DESIGN_SPEC.md: (N * 76) + ((N - 1) * 8) + 32
+    // Formula: (N * 76) + ((N - 1) * 8) + 32 padding
     const width = multi ? 864 : Math.max(220, r1 * 76 + (r1 - 1) * 8 + 32);
     const height = multi ? 188 : 112;
     return { width, height };
   };
 
-  // Synchronize window dimensions when items change while expanded
+  const { width: targetWidth, height: targetHeight } = getExpandedDimensions(allSlots.length);
+
+  // Synchronize OS window dimensions when items change while expanded
   useEffect(() => {
     if (isExpanded && ipcRenderer) {
-      const { width, height } = getExpandedDimensions(allSlots.length);
-      ipcRenderer.send("set-notch-state", "expanded", width, height);
+      ipcRenderer.send("set-notch-state", "expanded", targetWidth, targetHeight);
     }
-  }, [allSlots.length, isExpanded]);
+  }, [allSlots.length, isExpanded, targetWidth, targetHeight]);
 
   // 2. Expand / Collapse Window States
   const expandNotch = () => {
@@ -101,8 +128,7 @@ export default function App() {
     }
     setIsExpanded(true);
     if (ipcRenderer) {
-      const { width, height } = getExpandedDimensions();
-      ipcRenderer.send("set-notch-state", "expanded", width, height);
+      ipcRenderer.send("set-notch-state", "expanded", targetWidth, targetHeight);
     }
   };
 
@@ -120,7 +146,38 @@ export default function App() {
     }
   };
 
-  // 3. Mouse & Drag Handlers
+  // 3. Selection Mode Handlers
+  const toggleSelectMode = () => {
+    setIsSelectMode((prev) => {
+      if (prev) {
+        setSelectedIds(new Set());
+      }
+      return !prev;
+    });
+  };
+
+  const toggleItemSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (selectedIds.size === items.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(items.map((it) => it.id)));
+    }
+  };
+
+  // 4. Mouse & Drag Handlers
   const handleMouseEnter = () => {
     expandNotch();
   };
@@ -180,20 +237,37 @@ export default function App() {
     }
   };
 
-  // 4. Native OLE Drag-Out (Egress to other Apps)
+  // 5. Native OLE Drag-Out (Single item or Batch Multi-drag)
   const handleSlotDragStart = (e: React.DragEvent, item: StagedItem) => {
     // Crucial: preventDefault() stops Chromium's HTML5 text drag from colliding with Windows OLE DoDragDrop
     e.preventDefault();
     setIsDraggingOut(true);
 
     if (ipcRenderer) {
-      console.log("[Notch Egress] Initiating native drag-out for:", item.preview);
-      ipcRenderer.send("start-drag-item", item);
+      if (selectedIds.has(item.id) && selectedIds.size > 1) {
+        const selectedItems = items.filter((it) => selectedIds.has(it.id));
+        console.log(`[Notch Egress] Initiating batch drag-out for ${selectedItems.length} items`);
+        ipcRenderer.send("start-drag-item", selectedItems);
+      } else {
+        console.log("[Notch Egress] Initiating native drag-out for single item:", item.preview);
+        ipcRenderer.send("start-drag-item", item);
+      }
+    }
+  };
+
+  const handleBatchDragStart = (e: React.DragEvent) => {
+    e.preventDefault();
+    if (selectedIds.size === 0) return;
+    setIsDraggingOut(true);
+
+    if (ipcRenderer) {
+      const selectedItems = items.filter((it) => selectedIds.has(it.id));
+      console.log(`[Notch Egress] Initiating batch drag-out from badge for ${selectedItems.length} items`);
+      ipcRenderer.send("start-drag-item", selectedItems);
     }
   };
 
   const handleSlotDragEnd = () => {
-    // Keep notch open while interacting; will reset when native-drag-finished or user leaves
     console.log("[Notch Egress] DOM Drag lifecycle finished.");
   };
 
@@ -209,7 +283,7 @@ export default function App() {
     }
   };
 
-  // 5. Item Removal
+  // 6. Item Removal
   const handleDeleteItem = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     try {
@@ -232,6 +306,7 @@ export default function App() {
 
   const renderSlot = (item: StagedItem | null, index: number) => {
     const isNewest = item && orderedItems.length > 0 && item.id === orderedItems[orderedItems.length - 1]?.id;
+    const isSelected = item ? selectedIds.has(item.id) : false;
     const boxHeight = isMultiRow ? "h-[56px]" : "h-[62px]";
 
     return (
@@ -240,21 +315,49 @@ export default function App() {
         draggable={!!item}
         onDragStart={(e) => item && handleSlotDragStart(e, item)}
         onDragEnd={handleSlotDragEnd}
+        onClick={(e) => {
+          if (isSelectMode && item) {
+            e.stopPropagation();
+            toggleItemSelect(item.id);
+          }
+        }}
         className={`w-[76px] ${boxHeight} rounded-lg relative overflow-hidden flex flex-col items-center justify-center transition-all ${
           item
-            ? "bg-slate-800/90 border border-slate-700 hover:border-sky-400/80 shadow-md group cursor-grab active:cursor-grabbing hover:scale-105"
+            ? isSelected
+              ? "border-2 border-sky-400 bg-sky-950/80 shadow-[0_0_12px_rgba(56,189,248,0.4)] cursor-grab active:cursor-grabbing scale-102"
+              : "bg-slate-800/90 border border-slate-700 hover:border-sky-400/80 shadow-md group cursor-grab active:cursor-grabbing hover:scale-105"
             : "border border-dashed border-slate-700/60 bg-slate-900/40 hover:border-sky-500/50 hover:bg-slate-800/50 transition-colors"
         }`}
       >
         {item ? (
           <>
-            {/* Delete Button */}
-            <button
-              onClick={(e) => handleDeleteItem(e, item.id)}
-              className="absolute top-1 right-1 z-10 w-3.5 h-3.5 rounded-full bg-black/70 text-slate-300 hover:text-white hover:bg-red-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              <X className="w-2.5 h-2.5" />
-            </button>
+            {/* Selection Checkbox in Select Mode */}
+            {isSelectMode ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleItemSelect(item.id);
+                }}
+                className={`absolute top-1 left-1 z-20 w-4 h-4 rounded flex items-center justify-center transition-transform ${
+                  isSelected
+                    ? "bg-sky-400 text-slate-950 font-bold scale-110 shadow"
+                    : "bg-black/60 border border-slate-500 text-transparent hover:border-sky-400"
+                }`}
+              >
+                <Check className="w-3 h-3 stroke-[3]" />
+              </button>
+            ) : null}
+
+            {/* Delete Button (visible when not in select mode) */}
+            {!isSelectMode && (
+              <button
+                onClick={(e) => handleDeleteItem(e, item.id)}
+                className="absolute top-1 right-1 z-10 w-3.5 h-3.5 rounded-full bg-black/70 text-slate-300 hover:text-white hover:bg-red-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <X className="w-2.5 h-2.5" />
+              </button>
+            )}
 
             {/* Slot Content Preview */}
             {item.item_type === "image" ? (
@@ -309,18 +412,28 @@ export default function App() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <div
-        className="w-full h-full bg-[#0B0F19] text-white shadow-2xl border-x border-b border-sky-500/50 overflow-hidden flex flex-col items-center justify-between cursor-pointer transition-all duration-200"
-        style={{
+      {/* Dynamic Notch Box: animates width & height smoothly with elastic spring bounce */}
+      <motion.div
+        initial={false}
+        animate={{
+          width: isExpanded ? targetWidth : 180,
+          height: isExpanded ? targetHeight : 30,
           borderRadius: isExpanded ? "0px 0px 16px 16px" : "0px 0px 14px 14px",
         }}
+        transition={{
+          type: "spring",
+          stiffness: 340,
+          damping: 22,
+          mass: 0.8,
+        }}
+        className="bg-[#0B0F19] text-white shadow-2xl border-x border-b border-sky-500/50 overflow-hidden flex flex-col items-center justify-between cursor-pointer"
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        <AnimatePresence mode="wait">
+        <AnimatePresence initial={false}>
           {!isExpanded ? (
             // ================= STATE A: COLLAPSED NOTCH (180x30px) =================
             <motion.div
@@ -330,7 +443,7 @@ export default function App() {
               exit={{ opacity: 0 }}
               transition={{ duration: 0.12 }}
               onClick={expandNotch}
-              className="w-full h-full flex items-center justify-center gap-2 px-3 py-1 bg-black/95 relative"
+              className="w-[180px] h-[30px] flex items-center justify-center gap-2 px-3 py-1 bg-black/95 relative"
             >
               {/* Active Volatile RAM Indicator LED */}
               <span className="relative flex h-2.5 w-2.5">
@@ -345,19 +458,72 @@ export default function App() {
             // ================= STATE B: EXPANDED SHELF (Adaptive 1-20 Items) =================
             <motion.div
               key="expanded-content"
-              initial={{ opacity: 0, scale: 0.98 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.98 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               transition={{ duration: 0.15 }}
-              className="w-full h-full p-2.5 flex flex-col justify-between bg-[#0B0F19]"
+              style={{ width: targetWidth, height: targetHeight }}
+              className="p-2.5 flex flex-col justify-between bg-[#0B0F19]"
             >
               {/* Header Status Bar */}
               <div className="w-full flex items-center justify-between px-1 text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                {/* Left: Indicator & Buffer Count */}
                 <div className="flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-                  <span>RAM FIFO BUFFER ({items.length}/20)</span>
+                  <span>RAM FIFO ({items.length}/20)</span>
                 </div>
-                <div className="flex items-center gap-1">
+
+                {/* Center / Right: Multi-Select Toolbar & Pin / Clear */}
+                <div className="flex items-center gap-2">
+                  {/* Select Mode Toolbar */}
+                  {items.length > 0 && (
+                    <div className="flex items-center gap-1.5 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-700/60">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleSelectMode();
+                        }}
+                        className={`flex items-center gap-1 text-[10px] font-medium tracking-normal transition-colors px-1 py-0.5 rounded ${
+                          isSelectMode
+                            ? "text-sky-400 font-bold"
+                            : "text-slate-400 hover:text-slate-200"
+                        }`}
+                      >
+                        <ListChecks className="w-3 h-3" />
+                        <span>{isSelectMode ? "DONE" : "SELECT"}</span>
+                      </button>
+
+                      {isSelectMode && (
+                        <>
+                          <span className="text-slate-600">|</span>
+                          <button
+                            onClick={handleSelectAll}
+                            className="text-[10px] text-sky-400 hover:text-sky-300 underline lowercase font-mono tracking-normal"
+                          >
+                            {selectedIds.size === items.length ? "deselect all" : "select all"}
+                          </button>
+                          <span className="text-[9px] font-mono text-slate-400">
+                            ({selectedIds.size})
+                          </span>
+
+                          {selectedIds.size > 0 && (
+                            <div
+                              draggable
+                              onDragStart={handleBatchDragStart}
+                              onDragEnd={handleSlotDragEnd}
+                              title="Drag this badge to drop all selected items together"
+                              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-[9px] cursor-grab active:cursor-grabbing shadow-[0_0_10px_rgba(56,189,248,0.5)] transition-all animate-pulse"
+                            >
+                              <Layers className="w-2.5 h-2.5" />
+                              <span>DRAG ({selectedIds.size})</span>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Pin Button */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -372,6 +538,8 @@ export default function App() {
                   >
                     <Pin className={`w-3.5 h-3.5 ${isPinned ? "fill-sky-400" : ""}`} />
                   </button>
+
+                  {/* Clear Buffer Button */}
                   {items.length > 0 && (
                     <button
                       onClick={handleClearBuffer}
@@ -398,7 +566,7 @@ export default function App() {
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
+      </motion.div>
     </div>
   );
 }
