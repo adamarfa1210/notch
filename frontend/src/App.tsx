@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { FileText, File, X, Trash2, Plus } from "lucide-react";
+import { FileText, File, X, Trash2, Plus, GripVertical } from "lucide-react";
 
 export interface StagedItem {
   id: string;
@@ -87,7 +87,7 @@ export default function App() {
     e.preventDefault();
     e.stopPropagation();
 
-    // 1. Files dropped
+    // 1. Files dropped in
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const files = Array.from(e.dataTransfer.files);
       for (const file of files) {
@@ -98,11 +98,21 @@ export default function App() {
       return;
     }
 
-    // 2. Text / URI dropped
+    // 2. Text / URI dropped in
     const textData = e.dataTransfer.getData("text/plain");
     if (textData && textData.trim()) {
       await postItem("text", textData.trim());
       fetchFromHttp();
+    }
+  };
+
+  // 4. Native Egress (Dragging Item Out of Notch to other Apps)
+  const handleSlotDragStart = (e: React.DragEvent, item: StagedItem) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (ipcRenderer) {
+      console.log("[Notch] Initiating native drag-out for:", item.preview);
+      ipcRenderer.send("start-drag-item", item);
     }
   };
 
@@ -118,7 +128,7 @@ export default function App() {
     }
   };
 
-  // 4. Item Removal
+  // 5. Item Removal
   const handleDeleteItem = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     try {
@@ -212,9 +222,11 @@ export default function App() {
                 {slots.map((item, index) => (
                   <div
                     key={item?.id || `empty-${index}`}
+                    draggable={!!item}
+                    onDragStart={(e) => item && handleSlotDragStart(e, item)}
                     className={`w-[80px] h-[66px] rounded-lg relative overflow-hidden flex flex-col items-center justify-center transition-all ${
                       item
-                        ? "bg-slate-800/90 border border-slate-700 hover:border-sky-400/80 shadow-md group"
+                        ? "bg-slate-800/90 border border-slate-700 hover:border-sky-400/80 shadow-md group cursor-grab active:cursor-grabbing hover:scale-105"
                         : "border border-dashed border-slate-700/60 bg-slate-900/40"
                     }`}
                   >
@@ -233,17 +245,17 @@ export default function App() {
                           <img
                             src={`data:${item.mime};base64,${item.data}`}
                             alt="Preview"
-                            className="w-full h-full object-cover"
+                            className="w-full h-full object-cover pointer-events-none"
                           />
                         ) : item.item_type === "fileuri" ? (
-                          <div className="flex flex-col items-center justify-center p-1 text-center w-full">
+                          <div className="flex flex-col items-center justify-center p-1 text-center w-full pointer-events-none">
                             <File className="w-5 h-5 text-sky-400 mb-1" />
                             <span className="text-[9px] text-slate-300 truncate w-full px-1">
                               {item.preview}
                             </span>
                           </div>
                         ) : (
-                          <div className="flex flex-col items-center justify-center p-1.5 text-center w-full">
+                          <div className="flex flex-col items-center justify-center p-1.5 text-center w-full pointer-events-none">
                             <FileText className="w-4 h-4 text-emerald-400 mb-0.5" />
                             <span className="text-[9px] text-slate-200 line-clamp-2 leading-tight">
                               {item.preview}
@@ -251,8 +263,9 @@ export default function App() {
                           </div>
                         )}
 
-                        {/* Slot Index Badge */}
-                        <div className="absolute bottom-0.5 left-1 text-[8px] font-mono text-slate-500 opacity-60">
+                        {/* Slot Drag Handle Cue & Index */}
+                        <div className="absolute bottom-0.5 left-1 flex items-center gap-0.5 text-[8px] font-mono text-slate-400 opacity-60">
+                          <GripVertical className="w-2.5 h-2.5" />
                           #{index + 1}
                         </div>
                       </>

@@ -1,5 +1,7 @@
 const { app, BrowserWindow, screen, ipcMain, Tray, Menu } = require("electron");
 const path = require("path");
+const fs = require("fs");
+const os = require("os");
 
 let mainWindow = null;
 let tray = null;
@@ -48,7 +50,7 @@ function createNotchWindow() {
     frame: false,
     transparent: true,
     alwaysOnTop: true,
-    skipTaskbar: false, // Keep visible on taskbar so user can clearly see it's active
+    skipTaskbar: false,
     resizable: false,
     hasShadow: false,
     show: false,
@@ -71,7 +73,7 @@ function createNotchWindow() {
   console.log("[Electron] Loading Notch UI from:", distPath);
   mainWindow.loadFile(distPath);
 
-  // Dynamic window resizing for Collapsed vs Expanded notch
+  // 1. Dynamic window resizing for Collapsed vs Expanded notch
   ipcMain.on("set-notch-state", (event, state) => {
     if (!mainWindow) return;
 
@@ -79,6 +81,40 @@ function createNotchWindow() {
       positionWindow(460, 110);
     } else {
       positionWindow(180, 30);
+    }
+  });
+
+  // 2. Native OLE Drag-Out (Egress to other applications)
+  ipcMain.on("start-drag-item", (event, item) => {
+    try {
+      let targetFilePath = null;
+
+      if (item.item_type === "fileuri") {
+        targetFilePath = item.data;
+      } else if (item.item_type === "image") {
+        const tempDir = path.join(os.tmpdir(), "notch_export");
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+        targetFilePath = path.join(tempDir, `notch_img_${item.id.slice(0, 8)}.png`);
+        fs.writeFileSync(targetFilePath, Buffer.from(item.data, "base64"));
+      } else if (item.item_type === "text") {
+        const tempDir = path.join(os.tmpdir(), "notch_export");
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+        targetFilePath = path.join(tempDir, `notch_text_${item.id.slice(0, 8)}.txt`);
+        fs.writeFileSync(targetFilePath, item.data, "utf8");
+      }
+
+      if (targetFilePath && fs.existsSync(targetFilePath)) {
+        console.log(`[Electron] Starting native OLE drag-out for: ${targetFilePath}`);
+        const iconPath = path.join(__dirname, "tray-icon.ico");
+        event.sender.startDrag({
+          file: targetFilePath,
+          icon: iconPath,
+        });
+      } else {
+        console.warn(`[Electron] File path does not exist for drag-out: ${targetFilePath}`);
+      }
+    } catch (err) {
+      console.error("[Electron] Failed to start native drag:", err);
     }
   });
 
@@ -103,7 +139,7 @@ function createTray() {
       }
     });
 
-    console.log("[Electron] System Tray icon registered successfully with tray-icon.ico.");
+    console.log("[Electron] System Tray icon registered successfully.");
   } catch (err) {
     console.error("[Electron] Failed to create Tray icon:", err);
   }
