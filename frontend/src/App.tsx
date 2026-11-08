@@ -13,45 +13,19 @@ export interface StagedItem {
 
 const HTTP_API = "http://127.0.0.1:49152";
 
+// Helper for Electron IPC if running under Electron
+const electron = (window as any).require ? (window as any).require("electron") : null;
+
 export default function App() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [items, setItems] = useState<StagedItem[]>([]);
   const isTauriRef = useRef(false);
 
-  // 1. Initialize & Detect Tauri Environment
+  // 1. Initialize & Poll Data
   useEffect(() => {
-    let unlisten: (() => void) | undefined;
-
-    async function initTauri() {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        const { listen } = await import("@tauri-apps/api/event");
-        isTauriRef.current = true;
-
-        // Fetch initial buffer
-        const initial = await invoke<StagedItem[]>("get_buffer");
-        setItems(initial || []);
-
-        // Listen for reactive buffer updates
-        unlisten = await listen<{ items: StagedItem[] }>("buffer-updated", (event) => {
-          if (event.payload?.items) {
-            setItems(event.payload.items);
-          }
-        });
-      } catch {
-        // Fallback: Running in standard browser / dev server
-        isTauriRef.current = false;
-        fetchFromHttp();
-        const interval = setInterval(fetchFromHttp, 1000);
-        return () => clearInterval(interval);
-      }
-    }
-
-    initTauri();
-
-    return () => {
-      if (unlisten) unlisten();
-    };
+    fetchFromHttp();
+    const interval = setInterval(fetchFromHttp, 500);
+    return () => clearInterval(interval);
   }, []);
 
   async function fetchFromHttp() {
@@ -62,71 +36,113 @@ export default function App() {
         setItems(data);
       }
     } catch {
-      // HTTP server offline or starting
+      // Backend offline or starting
     }
   }
 
-  // 2. Window state management (Hover expand / collapse)
-  const handleMouseEnter = async () => {
+  // 2. Expand / Collapse Window States
+  const expandNotch = () => {
     setIsExpanded(true);
-    if (isTauriRef.current) {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("set_notch_state", { state: "expanded" });
-      } catch (err) {
-        console.error("Failed to invoke set_notch_state:", err);
-      }
+    if (electron?.ipcRenderer) {
+      electron.ipcRenderer.send("set-notch-state", "expanded");
     }
   };
 
-  const handleMouseLeave = async () => {
+  const collapseNotch = () => {
     setIsExpanded(false);
-    if (isTauriRef.current) {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("set_notch_state", { state: "collapsed" });
-      } catch (err) {
-        console.error("Failed to invoke set_notch_state:", err);
-      }
+    if (electron?.ipcRenderer) {
+      electron.ipcRenderer.send("set-notch-state", "collapsed");
     }
   };
 
-  // 3. Item removal
+  // 3. Mouse & Drag Event Handlers
+  const handleMouseEnter = () => {
+    expandNotch();
+  };
+
+  const handleMouseLeave = () => {
+    collapseNotch();
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    expandNotch();
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = "copy";
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    // 1. Files dropped
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files);
+      for (const file of files) {
+        // In desktop wrapper (Electron), file.path has the full local OS path
+        const filePath = (file as any).path || file.name;
+        await postItem("file", filePath);
+      }
+      fetchFromHttp();
+      return;
+    }
+
+    // 2. Text / URI dropped
+    const textData = e.dataTransfer.getData("text/plain");
+    if (textData && textData.trim()) {
+      await postItem("text", textData.trim());
+      fetchFromHttp();
+    }
+  };
+
+  const postItem = async (itemType: string, content: string) => {
+    try {
+      await fetch(`${HTTP_API}/api/items`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item_type: itemType, content }),
+      });
+    } catch (err) {
+      console.error("Failed to post item to backend:", err);
+    }
+  };
+
+  // 4. Item Removal
   const handleDeleteItem = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
-    if (isTauriRef.current) {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("delete_buffer_item", { id });
-      } catch (err) {
-        console.error("Failed to invoke delete_buffer_item:", err);
-      }
-    } else {
+    try {
       await fetch(`${HTTP_API}/api/items/${id}`, { method: "DELETE" });
       fetchFromHttp();
+    } catch (err) {
+      console.error("Failed to delete item:", err);
     }
   };
 
   const handleClearBuffer = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isTauriRef.current) {
-      try {
-        const { invoke } = await import("@tauri-apps/api/core");
-        await invoke("clear_buffer");
-      } catch (err) {
-        console.error("Failed to invoke clear_buffer:", err);
-      }
-    } else {
+    try {
       await fetch(`${HTTP_API}/api/items/clear`, { method: "POST" });
       fetchFromHttp();
+    } catch (err) {
+      console.error("Failed to clear buffer:", err);
     }
   };
 
-  // Render 5 fixed slots
+  // 5 Slot FIFO Layout
   const slots = Array.from({ length: 5 }, (_, idx) => items[idx] || null);
 
   return (
-    <div className="w-screen h-screen flex justify-center items-start overflow-hidden pointer-events-none">
+    <div
+      className="w-screen h-screen flex justify-center items-start overflow-hidden pointer-events-none select-none"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       <motion.div
         className="pointer-events-auto bg-[#0B0F19]/95 text-white backdrop-blur-md shadow-2xl border-x border-b border-sky-500/30 overflow-hidden flex flex-col items-center justify-between cursor-pointer"
         initial="collapsed"
@@ -147,6 +163,9 @@ export default function App() {
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
+        onDragEnter={handleDragEnter}
+        onDragOver={handleDragOver}
+        onDrop={handleDrop}
       >
         <AnimatePresence mode="wait">
           {!isExpanded ? (
@@ -242,7 +261,7 @@ export default function App() {
                         </div>
                       </>
                     ) : (
-                      // Empty Slot
+                      // Empty Slot - Active Drop Target
                       <div className="flex flex-col items-center justify-center text-slate-600">
                         <Plus className="w-3.5 h-3.5 stroke-[1.5]" />
                         <span className="text-[8px] font-mono mt-0.5 opacity-60">
