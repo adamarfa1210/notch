@@ -73,15 +73,22 @@ function createNotchWindow() {
   console.log("[Electron] Loading Notch UI from:", distPath);
   mainWindow.loadFile(distPath);
 
-  // 1. Dynamic window resizing for Collapsed vs Expanded notch
-  ipcMain.on("set-notch-state", (event, state) => {
+  // 1. Dynamic window resizing for Collapsed vs Expanded notch (1-20 items progressive width)
+  ipcMain.on("set-notch-state", (event, state, customWidth, customHeight) => {
     if (!mainWindow) return;
 
     if (state === "expanded") {
-      positionWindow(460, 110);
+      const w = typeof customWidth === "number" ? customWidth : 864;
+      const h = typeof customHeight === "number" ? customHeight : 112;
+      positionWindow(w, h);
     } else {
       positionWindow(180, 30);
     }
+  });
+
+  ipcMain.on("set-notch-dimensions", (event, width, height) => {
+    if (!mainWindow) return;
+    positionWindow(width, height);
   });
 
   // 2. Native OLE Drag-Out (Egress to Windows File Explorer / WhatsApp / External Apps)

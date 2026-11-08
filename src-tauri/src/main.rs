@@ -7,7 +7,7 @@ use std::time::Duration;
 #[global_allocator]
 static GLOBAL: std::alloc::System = std::alloc::System;
 
-const BUFFER_CAPACITY: usize = 5;
+const BUFFER_CAPACITY: usize = 20;
 const HTTP_PORT: u16 = 49152;
 const CLIPBOARD_POLL_MS: u64 = 300;
 
@@ -15,7 +15,7 @@ fn main() {
     println!("=====================================================");
     println!("  Dynamic RAM Notch - Backend Core Daemon (v0.1.0)   ");
     println!("=====================================================");
-    println!("* Architecture: In-Memory FIFO Queue (Max 5 items)");
+    println!("* Architecture: In-Memory FIFO Queue (Max 20 items)");
     println!("* Zero-Disk Persistence: All data is volatile in RAM");
     println!("* Clipboard Listener: Active (Win32 polling every {CLIPBOARD_POLL_MS}ms)");
     println!("* Local HTTP API: Active on http://127.0.0.1:{HTTP_PORT}");

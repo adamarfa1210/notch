@@ -1,12 +1,12 @@
-# Tauri v2 Backend & Frontend Integration Contract
+# Tauri v2 Backend & Frontend Integration Contract (Adaptive 1–20 Items)
 
-Dokumen ini adalah panduan teknis langkah-demi-langkah bagi **Agen Backend** untuk mengimplementasikan fungsionalitas sistem agar klop dengan desain antarmuka Notch di [`frontend/design/notch_ui_spec.figcraft`](./design/notch_ui_spec.figcraft).
+Panduan teknis langkah-demi-langkah bagi **Agen Backend** untuk mengimplementasikan fungsionalitas sistem agar sinkron dengan antarmuka Notch baru di [`frontend/design/notch_ui_spec.figcraft`](./design/notch_ui_spec.figcraft).
 
 ---
 
-## 1. Konfigurasi Window Tauri (`src-tauri/tauri.conf.json`)
+## 1. Konfigurasi Awal Window Tauri (`src-tauri/tauri.conf.json`)
 
-Jendela aplikasi harus dikonfigurasi sebagai *frameless transparent overlay*:
+Mengingat ukuran notch dapat mencapai `864 × 180 px`, batas maksimum ukuran window harus diatur fleksibel:
 
 ```json
 {
@@ -14,7 +14,7 @@ Jendela aplikasi harus dikonfigurasi sebagai *frameless transparent overlay*:
     "windows": [
       {
         "label": "main",
-        "title": "Dynamic Notch",
+        "title": "Dynamic RAM Notch",
         "width": 140,
         "height": 12,
         "decorations": false,
@@ -31,38 +31,29 @@ Jendela aplikasi harus dikonfigurasi sebagai *frameless transparent overlay*:
 
 ---
 
-## 2. Koordinat & Dynamic Window Resizing (Rust Backend)
+## 2. Dynamic Window Resizing (Rust Backend)
 
-Ketika mouse mengarah ke area notch (*hover*), Frontend akan memanggil command resize ke Backend. Backend mengubah ukuran window secara dinamis:
+Karena ukuran Notch berubah secara dinamis mengikuti jumlah file di RAM ($N$ file terisi + 1 slot kosong), Backend menyediakan command yang menerima dimensi target dari Frontend atau menghitungnya langsung:
 
-| State | Lebar | Tinggi | Posisi X (Pusat Monitor) | Posisi Y |
-| :--- | :--- | :--- | :--- | :--- |
-| **Collapsed (Idle)** | `140 px` | `12 px` | `(ScreenWidth - 140) / 2` | `0` (Menempel bezel atas) |
-| **Expanded (Hover)** | `440 px` | `96 px` | `(ScreenWidth - 440) / 2` | `0` (Menempel bezel atas) |
-
-### Implementasi Tauri Command (Rust):
 ```rust
 use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize};
 
 #[tauri::command]
-fn set_notch_state(app: AppHandle, state: &str) -> Result<(), String> {
+fn set_notch_dimensions(app: AppHandle, width: f64, height: f64) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         let monitor = window.current_monitor().map_err(|e| e.to_string())?.ok_or("No monitor")?;
         let screen_width = monitor.size().width as f64;
         let scale_factor = monitor.scale_factor();
 
-        let (target_w, target_h) = match state {
-            "expanded" => (440.0, 96.0),
-            _ => (140.0, 12.0),
-        };
-
-        let target_x = (screen_width - (target_w * scale_factor)) / 2.0;
+        // Posisi X selalu presisi di tengah monitor
+        let target_x = (screen_width - (width * scale_factor)) / 2.0;
 
         window.set_size(PhysicalSize::new(
-            (target_w * scale_factor) as u32,
-            (target_h * scale_factor) as u32,
+            (width * scale_factor) as u32,
+            (height * scale_factor) as u32,
         )).map_err(|e| e.to_string())?;
 
+        // Posisi Y selalu menempel bezel atas monitor
         window.set_position(PhysicalPosition::new(target_x as i32, 0))
             .map_err(|e| e.to_string())?;
     }
@@ -72,12 +63,15 @@ fn set_notch_state(app: AppHandle, state: &str) -> Result<(), String> {
 
 ---
 
-## 3. Struktur Data FIFO RAM Buffer (Rust Backend)
+## 3. Struktur Data FIFO RAM Buffer (Kapasitas Maksimal 20 Item)
 
-Kapasitas antrean dibatasi maksimal **5 item**:
+Antrean memori RAM sekarang menampung hingga **20 item**:
 
 ```rust
+use std::collections::VecDeque;
 use serde::{Deserialize, Serialize};
+
+pub const MAX_RAM_CAPACITY: usize = 20;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(tag = "type", content = "data")]
@@ -93,6 +87,21 @@ pub struct ClipboardItem {
     pub timestamp: u64,
     pub payload: ClipboardPayload,
 }
+
+pub struct ClipboardState {
+    pub queue: VecDeque<ClipboardItem>,
+}
+
+impl ClipboardState {
+    pub fn push_new(&mut self, item: ClipboardItem) {
+        // Item baru masuk di sisi kanan (push_back) atau indeks baru
+        if self.queue.len() >= MAX_RAM_CAPACITY {
+            // Hapus item tertua (paling kiri)
+            self.queue.pop_front();
+        }
+        self.queue.push_back(item);
+    }
+}
 ```
 
 ---
@@ -100,20 +109,20 @@ pub struct ClipboardItem {
 ## 4. Tauri IPC Endpoints
 
 ### A. Commands (Frontend ➔ Backend)
-* `get_buffer() -> Vec<ClipboardItem>`: Mengambil 5 item yang saat ini ada di RAM.
-* `set_notch_state(state: "collapsed" | "expanded")`: Mengubah ukuran window native.
+* `get_buffer() -> Vec<ClipboardItem>`: Mengambil seluruh item yang ada di antrean RAM.
+* `set_notch_dimensions(width: f64, height: f64)`: Mengubah ukuran dan posisi horizontal window native.
 * `delete_buffer_item(id: String)`: Menghapus item tertentu dari antrean (saat tombol `×` diklik).
 * `start_drag(id: String)`: Memulai operasi OLE native drag-and-drop keluar jendela.
 
 ### B. Events (Backend ➔ Frontend)
-* `buffer-updated`: Dipancarkan oleh Backend setiap kali ada copy baru, screenshot, atau item dihapus.
+* `buffer-updated`: Dipancarkan setiap kali ada copy baru, screenshot, atau file di-drop.
   ```json
   {
     "items": [
-      { "id": "1", "type": "Image", ... },
-      { "id": "2", "type": "Text", ... }
+      { "id": "uuid-1", "type": "File", "data": { ... } },
+      { "id": "uuid-2", "type": "Text", "data": { ... } }
     ],
-    "count": 3,
-    "max": 5
+    "count": 2,
+    "max": 20
   }
   ```

@@ -66,6 +66,33 @@ export default function App() {
     }
   }
 
+  // Progressive adaptive slots for up to 20 items (DESIGN_SPEC.md):
+  // Oldest items on left, newest on right, followed by active "+ Drop next" slot
+  const orderedItems = [...items].reverse();
+  const allSlots: (StagedItem | null)[] =
+    orderedItems.length < 20 ? [...orderedItems, null] : orderedItems.slice(0, 20);
+
+  const isMultiRow = allSlots.length > 10;
+  const row1Slots = allSlots.slice(0, 10);
+  const row2Slots = isMultiRow ? allSlots.slice(10) : [];
+
+  const getExpandedDimensions = (slotsCount = allSlots.length) => {
+    const multi = slotsCount > 10;
+    const r1 = multi ? 10 : slotsCount;
+    // Formula from DESIGN_SPEC.md: (N * 76) + ((N - 1) * 8) + 32
+    const width = multi ? 864 : Math.max(220, r1 * 76 + (r1 - 1) * 8 + 32);
+    const height = multi ? 188 : 112;
+    return { width, height };
+  };
+
+  // Synchronize window dimensions when items change while expanded
+  useEffect(() => {
+    if (isExpanded && ipcRenderer) {
+      const { width, height } = getExpandedDimensions(allSlots.length);
+      ipcRenderer.send("set-notch-state", "expanded", width, height);
+    }
+  }, [allSlots.length, isExpanded]);
+
   // 2. Expand / Collapse Window States
   const expandNotch = () => {
     if (leaveTimeoutRef.current) {
@@ -74,7 +101,8 @@ export default function App() {
     }
     setIsExpanded(true);
     if (ipcRenderer) {
-      ipcRenderer.send("set-notch-state", "expanded");
+      const { width, height } = getExpandedDimensions();
+      ipcRenderer.send("set-notch-state", "expanded", width, height);
     }
   };
 
@@ -202,8 +230,77 @@ export default function App() {
     }
   };
 
-  // 5 Slot FIFO Layout
-  const slots = Array.from({ length: 5 }, (_, idx) => items[idx] || null);
+  const renderSlot = (item: StagedItem | null, index: number) => {
+    const isNewest = item && orderedItems.length > 0 && item.id === orderedItems[orderedItems.length - 1]?.id;
+    const boxHeight = isMultiRow ? "h-[56px]" : "h-[62px]";
+
+    return (
+      <div
+        key={item?.id || `empty-${index}`}
+        draggable={!!item}
+        onDragStart={(e) => item && handleSlotDragStart(e, item)}
+        onDragEnd={handleSlotDragEnd}
+        className={`w-[76px] ${boxHeight} rounded-lg relative overflow-hidden flex flex-col items-center justify-center transition-all ${
+          item
+            ? "bg-slate-800/90 border border-slate-700 hover:border-sky-400/80 shadow-md group cursor-grab active:cursor-grabbing hover:scale-105"
+            : "border border-dashed border-slate-700/60 bg-slate-900/40 hover:border-sky-500/50 hover:bg-slate-800/50 transition-colors"
+        }`}
+      >
+        {item ? (
+          <>
+            {/* Delete Button */}
+            <button
+              onClick={(e) => handleDeleteItem(e, item.id)}
+              className="absolute top-1 right-1 z-10 w-3.5 h-3.5 rounded-full bg-black/70 text-slate-300 hover:text-white hover:bg-red-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <X className="w-2.5 h-2.5" />
+            </button>
+
+            {/* Slot Content Preview */}
+            {item.item_type === "image" ? (
+              <img
+                src={`data:${item.mime};base64,${item.data}`}
+                alt="Preview"
+                className="w-full h-full object-cover pointer-events-none"
+              />
+            ) : item.item_type === "fileuri" ? (
+              <div className="flex flex-col items-center justify-center p-1 text-center w-full pointer-events-none">
+                <File className={`${isMultiRow ? "w-4 h-4" : "w-5 h-5"} text-sky-400 mb-0.5`} />
+                <span className="text-[9px] text-slate-300 truncate w-full px-1">
+                  {item.preview}
+                </span>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-1 text-center w-full pointer-events-none">
+                <FileText className={`${isMultiRow ? "w-3.5 h-3.5" : "w-4 h-4"} text-emerald-400 mb-0.5`} />
+                <span className="text-[9px] text-slate-200 line-clamp-2 leading-tight">
+                  {item.preview}
+                </span>
+              </div>
+            )}
+
+            {/* Slot Cue (Newest or Index) */}
+            <div className="absolute bottom-0.5 left-1 flex items-center gap-0.5 text-[8px] font-mono text-slate-400 opacity-70">
+              <GripVertical className="w-2.5 h-2.5" />
+              {isNewest ? (
+                <span className="text-sky-400 font-semibold">NEW</span>
+              ) : (
+                <span>#{index + 1}</span>
+              )}
+            </div>
+          </>
+        ) : (
+          // Empty Slot (Drop next)
+          <div className="flex flex-col items-center justify-center text-slate-500">
+            <Plus className="w-4 h-4 stroke-[1.5]" />
+            <span className="text-[8px] font-mono mt-0.5 opacity-70">
+              Drop next
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div
@@ -241,11 +338,11 @@ export default function App() {
                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
               </span>
               <span className="text-[11px] font-semibold tracking-wider text-slate-200 uppercase font-mono">
-                RAM NOTCH {items.length > 0 ? `(${items.length}/5)` : ""}
+                RAM NOTCH {items.length > 0 ? `(${items.length}/20)` : ""}
               </span>
             </motion.div>
           ) : (
-            // ================= STATE B: EXPANDED SHELF (460x110px) =================
+            // ================= STATE B: EXPANDED SHELF (Adaptive 1-20 Items) =================
             <motion.div
               key="expanded-content"
               initial={{ opacity: 0, scale: 0.98 }}
@@ -258,7 +355,7 @@ export default function App() {
               <div className="w-full flex items-center justify-between px-1 text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
                 <div className="flex items-center gap-2">
                   <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-                  <span>RAM FIFO BUFFER ({items.length}/5)</span>
+                  <span>RAM FIFO BUFFER ({items.length}/20)</span>
                 </div>
                 <div className="flex items-center gap-1">
                   <button
@@ -287,71 +384,17 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 5 Thumbnail Slots */}
-              <div className="flex items-center justify-between gap-2 w-full mt-1">
-                {slots.map((item, index) => (
-                  <div
-                    key={item?.id || `empty-${index}`}
-                    draggable={!!item}
-                    onDragStart={(e) => item && handleSlotDragStart(e, item)}
-                    onDragEnd={handleSlotDragEnd}
-                    className={`w-[80px] h-[66px] rounded-lg relative overflow-hidden flex flex-col items-center justify-center transition-all ${
-                      item
-                        ? "bg-slate-800/90 border border-slate-700 hover:border-sky-400/80 shadow-md group cursor-grab active:cursor-grabbing hover:scale-105"
-                        : "border border-dashed border-slate-700/60 bg-slate-900/40"
-                    }`}
-                  >
-                    {item ? (
-                      <>
-                        {/* Delete Button */}
-                        <button
-                          onClick={(e) => handleDeleteItem(e, item.id)}
-                          className="absolute top-1 right-1 z-10 w-4 h-4 rounded-full bg-black/70 text-slate-300 hover:text-white hover:bg-red-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-
-                        {/* Slot Content Preview */}
-                        {item.item_type === "image" ? (
-                          <img
-                            src={`data:${item.mime};base64,${item.data}`}
-                            alt="Preview"
-                            className="w-full h-full object-cover pointer-events-none"
-                          />
-                        ) : item.item_type === "fileuri" ? (
-                          <div className="flex flex-col items-center justify-center p-1 text-center w-full pointer-events-none">
-                            <File className="w-5 h-5 text-sky-400 mb-1" />
-                            <span className="text-[9px] text-slate-300 truncate w-full px-1">
-                              {item.preview}
-                            </span>
-                          </div>
-                        ) : (
-                          <div className="flex flex-col items-center justify-center p-1.5 text-center w-full pointer-events-none">
-                            <FileText className="w-4 h-4 text-emerald-400 mb-0.5" />
-                            <span className="text-[9px] text-slate-200 line-clamp-2 leading-tight">
-                              {item.preview}
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Slot Drag Handle Cue & Index */}
-                        <div className="absolute bottom-0.5 left-1 flex items-center gap-0.5 text-[8px] font-mono text-slate-400 opacity-60">
-                          <GripVertical className="w-2.5 h-2.5" />
-                          #{index + 1}
-                        </div>
-                      </>
-                    ) : (
-                      // Empty Slot - Active Drop Target
-                      <div className="flex flex-col items-center justify-center text-slate-600">
-                        <Plus className="w-4 h-4 stroke-[1.5]" />
-                        <span className="text-[9px] font-mono mt-0.5 opacity-60">
-                          #{index + 1}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                ))}
+              {/* Row 1 (Up to 10 Slots) */}
+              <div className="flex items-center justify-center gap-2 w-full mt-1">
+                {row1Slots.map((item, index) => renderSlot(item, index))}
               </div>
+
+              {/* Row 2 (Slots 11-20, Center-Aligned if Multi-Row) */}
+              {isMultiRow && (
+                <div className="flex items-center justify-center gap-2 w-full mt-2">
+                  {row2Slots.map((item, index) => renderSlot(item, 10 + index))}
+                </div>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
