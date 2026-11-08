@@ -50,6 +50,9 @@ impl ClipboardMonitor {
                 }
             };
 
+            #[cfg(windows)]
+            let mut last_seq: u32 = unsafe { GetClipboardSequenceNumber() };
+            #[cfg(not(windows))]
             let mut last_seq: u32 = 0;
             let mut last_hash: u64 = 0;
 

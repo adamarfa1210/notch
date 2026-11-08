@@ -1,4 +1,4 @@
-use notch_backend::{ClipboardMonitor, FifoBuffer, LocalHttpServer, StagedItem};
+use notch_backend::{ClipboardMonitor, FifoBuffer, LocalHttpServer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -22,13 +22,6 @@ fn main() {
     println!("=====================================================");
 
     let buffer = Arc::new(FifoBuffer::new(BUFFER_CAPACITY));
-
-    // Seed initial greeting/welcome item into buffer
-    let welcome_item = StagedItem::new_text(
-        "welcome-01".to_string(),
-        "Notch Dynamic RAM Buffer ready. Copied text/images appear here.".to_string(),
-    );
-    buffer.push(welcome_item);
 
     // 1. Start Clipboard Monitor
     let clipboard_monitor = ClipboardMonitor::new();
