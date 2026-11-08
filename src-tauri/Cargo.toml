@@ -1,0 +1,21 @@
+[package]
+name = "notch-backend"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tiny_http = "0.12"
+arboard = "3.4"
+image = { version = "0.25", default-features = false, features = ["png"] }
+base64 = "0.22"
+uuid = { version = "1.10", features = ["v4", "fast-rng"] }
+
+[lib]
+name = "notch_backend"
+path = "src/lib.rs"
+
+[[bin]]
+name = "notch-daemon"
+path = "src/main.rs"

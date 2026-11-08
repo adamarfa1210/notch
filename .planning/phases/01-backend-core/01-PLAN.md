@@ -13,20 +13,23 @@ Implement a clean, robust, anti-slop Rust backend crate in `src-tauri/` containi
 - HTTP-01, HTTP-02, HTTP-03, HTTP-04
 
 ## Task Breakdown
-1. **Initialize `src-tauri/Cargo.toml`**: Configure dependencies (`tiny_http`, `serde`, `serde_json`, `arboard`, `image`, `uuid`, etc.).
-2. **Buffer Module (`src-tauri/src/buffer.rs`)**:
-   - Data structures: `StagedItem`, `ItemPayload` (Text, Image, FileUri).
-   - `FifoBuffer` with `RwLock<VecDeque<StagedItem>>`, capacity = 5.
-   - Comprehensive unit tests verifying FIFO push, eviction, removal, and concurrency.
-3. **Clipboard Monitor (`src-tauri/src/clipboard.rs`)**:
-   - Background polling/event loop using `arboard`.
-   - Content hashing to avoid duplicate ingress loops.
-   - Image conversion to PNG base64.
-4. **Embedded HTTP Server (`src-tauri/src/server.rs`)**:
-   - `tiny_http` server on `127.0.0.1:49152`.
-   - Routes: `/api/items`, `/api/items/latest`, `/api/items/<id>` (DELETE), `/health`.
-5. **CLI / Daemon Entrypoint (`src-tauri/src/main.rs`)**:
-   - Runs the buffer, starts clipboard listener thread, starts HTTP server thread.
-6. **Verification & Tests**:
-   - Run `cargo test` to verify all unit tests pass.
-   - Start the daemon and run `curl http://127.0.0.1:49152/health` and clipboard ingestion checks.
+- [x] **Initialize `src-tauri/Cargo.toml`**: Configured dependencies (`tiny_http`, `serde`, `serde_json`, `arboard`, `image`, `uuid`, etc.).
+- [x] **Buffer Module (`src-tauri/src/buffer.rs`)**:
+  - Implemented `StagedItem`, `ItemType` (Text, Image, FileUri).
+  - Implemented `FifoBuffer` with `RwLock<VecDeque<StagedItem>>`, capacity = 5.
+  - Implemented 4 comprehensive unit tests (eviction, ID deletion, clearing, concurrency).
+- [x] **Clipboard Monitor (`src-tauri/src/clipboard.rs`)**:
+  - Background polling loop with `arboard`.
+  - Fast hash deduplication to avoid repetitive ingress.
+  - In-memory RGBA to PNG Base64 converter.
+- [x] **Embedded HTTP Server (`src-tauri/src/server.rs`)**:
+  - `tiny_http` server on `127.0.0.1:49152`.
+  - Routes: `/health`, `/api/items`, `/api/items/latest`, `/api/items/<id>` (DELETE), `/api/items` (POST).
+- [x] **CLI / Daemon Entrypoint (`src-tauri/src/main.rs`)**:
+  - Runs daemon, connects buffer, clipboard monitor, and HTTP server.
+- [x] **Verification & Tests**:
+  - `cargo test`: 4 passed (100% pass rate).
+  - Integration verified via live HTTP requests to `/health`, `/api/items`, `/api/items/latest`, and `/api/items/:id`.
+
+## Verdict
+COMPLETED & VERIFIED
