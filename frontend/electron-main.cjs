@@ -2,8 +2,17 @@ const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage } = require
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const http = require("http");
+const { spawn } = require("child_process");
 
-// Configure isolated user data directory and disable shader disk cache to avoid Windows access denied errors
+// 1. Single Instance Lock to prevent duplicate processes & GPU cache contention
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
+
+// 2. Configure isolated user data directory and disable shader disk cache to avoid Windows access denied errors
 app.setName("DynamicRamNotch");
 const userDataPath = path.join(os.tmpdir(), "dynamic_ram_notch_profile");
 if (!fs.existsSync(userDataPath)) {
@@ -19,6 +28,62 @@ let mainWindow = null;
 let tray = null;
 let selectedDisplayId = null;
 let collapseTimer = null;
+let daemonProcess = null;
+
+// Helper: Check if Rust Backend Daemon is already running on port 49152
+function isDaemonRunning(callback) {
+  const req = http.get("http://127.0.0.1:49152/health", (res) => {
+    callback(res.statusCode === 200);
+  });
+  req.on("error", () => callback(false));
+  req.setTimeout(600, () => {
+    req.destroy();
+    callback(false);
+  });
+}
+
+// Helper: Automatically launch Rust Backend Daemon in background if needed
+function startDaemonIfNeeded() {
+  isDaemonRunning((running) => {
+    if (running) {
+      console.log("[Electron] Notch backend daemon is already active.");
+      return;
+    }
+
+    let daemonExePath = "";
+    if (app.isPackaged) {
+      daemonExePath = path.join(process.resourcesPath, "notch-daemon.exe");
+    } else {
+      const releasePath = path.resolve(__dirname, "..", "src-tauri", "target", "release", "notch-daemon.exe");
+      const debugPath = path.resolve(__dirname, "..", "src-tauri", "target", "debug", "notch-daemon.exe");
+      daemonExePath = fs.existsSync(releasePath) ? releasePath : debugPath;
+    }
+
+    if (fs.existsSync(daemonExePath)) {
+      try {
+        daemonProcess = spawn(daemonExePath, [], {
+          windowsHide: true,
+          stdio: "ignore",
+          detached: false,
+        });
+        console.log("[Electron] Successfully spawned Notch daemon silently:", daemonExePath);
+      } catch (err) {
+        console.error("[Electron] Failed to spawn Notch daemon:", err);
+      }
+    } else {
+      console.warn("[Electron] Notch daemon binary not found at:", daemonExePath);
+    }
+  });
+}
+
+function stopDaemon() {
+  if (daemonProcess && !daemonProcess.killed) {
+    try {
+      daemonProcess.kill();
+    } catch {}
+    daemonProcess = null;
+  }
+}
 
 function getActiveDisplay() {
   const displays = screen.getAllDisplays();
@@ -66,6 +131,9 @@ function positionWindow(width, height) {
 function createNotchWindow() {
   const initialWidth = 180;
   const initialHeight = 30;
+  const iconPath = fs.existsSync(path.join(__dirname, "icon.ico"))
+    ? path.join(__dirname, "icon.ico")
+    : path.join(__dirname, "tray-icon.ico");
 
   mainWindow = new BrowserWindow({
     width: initialWidth,
@@ -77,6 +145,7 @@ function createNotchWindow() {
     resizable: false,
     hasShadow: false,
     show: false,
+    icon: iconPath,
     backgroundColor: "#00000000",
     webPreferences: {
       nodeIntegration: true,
@@ -201,7 +270,9 @@ function createNotchWindow() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, "tray-icon.ico");
+  const iconPath = fs.existsSync(path.join(__dirname, "icon.ico"))
+    ? path.join(__dirname, "icon.ico")
+    : path.join(__dirname, "tray-icon.ico");
   try {
     tray = new Tray(iconPath);
     tray.setToolTip("Dynamic RAM Notch (Clipboard Manager)");
@@ -286,6 +357,7 @@ function updateTrayMenu() {
     {
       label: "Exit Notch",
       click: () => {
+        stopDaemon();
         app.quit();
       },
     },
@@ -294,8 +366,18 @@ function updateTrayMenu() {
   tray.setContextMenu(contextMenu);
 }
 
+// Single instance handler: focus window if another instance tries to launch
+app.on("second-instance", () => {
+  if (mainWindow) {
+    mainWindow.show();
+    mainWindow.focus();
+    positionWindow(180, 30);
+  }
+});
+
 // When Electron is ready
 app.whenReady().then(() => {
+  startDaemonIfNeeded();
   createNotchWindow();
   createTray();
 
@@ -304,6 +386,11 @@ app.whenReady().then(() => {
   });
 });
 
+app.on("will-quit", () => {
+  stopDaemon();
+});
+
 app.on("window-all-closed", () => {
+  stopDaemon();
   if (process.platform !== "darwin") app.quit();
 });

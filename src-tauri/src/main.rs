@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use notch_backend::{ClipboardMonitor, FifoBuffer, LocalHttpServer};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
