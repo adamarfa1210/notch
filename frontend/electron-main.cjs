@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, Tray, Menu } = require("electron");
+const { app, BrowserWindow, screen, ipcMain, Tray, Menu, nativeImage } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -84,13 +84,31 @@ function createNotchWindow() {
     }
   });
 
-  // 2. Native OLE Drag-Out (Egress to other applications)
+  // 2. Native OLE Drag-Out (Egress to Windows File Explorer / WhatsApp / External Apps)
   ipcMain.on("start-drag-item", (event, item) => {
     try {
       let targetFilePath = null;
 
       if (item.item_type === "fileuri") {
         targetFilePath = item.data;
+
+        // Robust resolution for Unicode, emojis, or relative paths:
+        if (!fs.existsSync(targetFilePath)) {
+          const folderAwal = path.resolve(__dirname, "..", "testing_dragdrop", "folder_awal");
+          if (fs.existsSync(folderAwal)) {
+            const files = fs.readdirSync(folderAwal);
+            for (const f of files) {
+              if (
+                f === item.preview ||
+                f.normalize("NFC") === item.preview.normalize("NFC") ||
+                f.includes(item.preview.slice(0, 20))
+              ) {
+                targetFilePath = path.join(folderAwal, f);
+                break;
+              }
+            }
+          }
+        }
       } else if (item.item_type === "image") {
         const tempDir = path.join(os.tmpdir(), "notch_export");
         if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
@@ -104,14 +122,17 @@ function createNotchWindow() {
       }
 
       if (targetFilePath && fs.existsSync(targetFilePath)) {
-        console.log(`[Electron] Starting native OLE drag-out for: ${targetFilePath}`);
-        const iconPath = path.join(__dirname, "tray-icon.ico");
+        const resolvedPath = path.resolve(targetFilePath);
+        console.log(`[Electron] Starting native OLE drag-out for: ${resolvedPath}`);
+        const iconPath = path.join(__dirname, "drag-icon.png");
+        const icon = nativeImage.createFromPath(iconPath);
         event.sender.startDrag({
-          file: targetFilePath,
-          icon: iconPath,
+          file: resolvedPath,
+          files: [resolvedPath],
+          icon: icon.isEmpty() ? iconPath : icon,
         });
       } else {
-        console.warn(`[Electron] File path does not exist for drag-out: ${targetFilePath}`);
+        console.warn(`[Electron] Drag-out aborted: file does not exist on disk: "${targetFilePath}"`);
       }
     } catch (err) {
       console.error("[Electron] Failed to start native drag:", err);

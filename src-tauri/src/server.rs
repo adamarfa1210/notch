@@ -72,8 +72,14 @@ impl LocalHttpServer {
                     // 4. Manually post item into buffer (CLI / external push)
                     (&Method::Post, "/api/items") => {
                         let mut content = Vec::new();
+                        let body_len = request.body_length();
                         let mut reader = request.as_reader();
-                        let _ = std::io::Read::read_to_end(&mut reader, &mut content);
+                        if let Some(len) = body_len {
+                            content.resize(len, 0);
+                            let _ = std::io::Read::read_exact(&mut reader, &mut content);
+                        } else {
+                            let _ = std::io::Read::read_to_end(&mut reader, &mut content);
+                        }
 
                         if let Ok(req) = serde_json::from_slice::<CreateItemRequest>(&content) {
                             let id = Uuid::new_v4().to_string();
@@ -140,13 +146,16 @@ impl LocalHttpServer {
 
 fn json_response(status: StatusCode, body: &str) -> Response<std::io::Cursor<Vec<u8>>> {
     let mut resp = Response::from_string(body).with_status_code(status);
-    if let Ok(h) = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]) {
+    if let Ok(h) = Header::from_bytes(&b"Content-Type"[..], &b"application/json; charset=utf-8"[..]) {
         resp.add_header(h);
     }
     if let Ok(h) = Header::from_bytes(&b"Access-Control-Allow-Origin"[..], &b"*"[..]) {
         resp.add_header(h);
     }
     if let Ok(h) = Header::from_bytes(&b"Access-Control-Allow-Methods"[..], &b"GET, POST, DELETE, OPTIONS"[..]) {
+        resp.add_header(h);
+    }
+    if let Ok(h) = Header::from_bytes(&b"Access-Control-Allow-Headers"[..], &b"Content-Type"[..]) {
         resp.add_header(h);
     }
     resp
