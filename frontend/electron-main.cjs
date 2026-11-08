@@ -131,6 +131,10 @@ function createNotchWindow() {
           files: [resolvedPath],
           icon: icon.isEmpty() ? iconPath : icon,
         });
+        console.log(`[Electron] Native OLE drag-out completed for: ${resolvedPath}`);
+        if (event.sender && !event.sender.isDestroyed()) {
+          event.sender.send("native-drag-finished", { path: resolvedPath });
+        }
       } else {
         console.warn(`[Electron] Drag-out aborted: file does not exist on disk: "${targetFilePath}"`);
       }

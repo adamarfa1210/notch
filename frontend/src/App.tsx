@@ -38,6 +38,19 @@ export default function App() {
   useEffect(() => {
     fetchFromHttp();
     const interval = setInterval(fetchFromHttp, 400);
+
+    if (ipcRenderer) {
+      const handleNativeDragFinished = (_: any, data: any) => {
+        console.log("[Notch] Native OLE drag finished:", data);
+        setIsDraggingOut(false);
+      };
+      ipcRenderer.on("native-drag-finished", handleNativeDragFinished);
+      return () => {
+        clearInterval(interval);
+        ipcRenderer.removeListener("native-drag-finished", handleNativeDragFinished);
+      };
+    }
+
     return () => clearInterval(interval);
   }, []);
 
@@ -141,9 +154,8 @@ export default function App() {
 
   // 4. Native OLE Drag-Out (Egress to other Apps)
   const handleSlotDragStart = (e: React.DragEvent, item: StagedItem) => {
-    // Set HTML5 dataTransfer attributes to keep drag active
-    e.dataTransfer.effectAllowed = "copyMove";
-    e.dataTransfer.setData("text/plain", item.data);
+    // Crucial: preventDefault() stops Chromium's HTML5 text drag from colliding with Windows OLE DoDragDrop
+    e.preventDefault();
     setIsDraggingOut(true);
 
     if (ipcRenderer) {
@@ -153,11 +165,8 @@ export default function App() {
   };
 
   const handleSlotDragEnd = () => {
-    console.log("[Notch Egress] Drag completed or cancelled.");
-    setIsDraggingOut(false);
-    setTimeout(() => {
-      collapseNotch();
-    }, 400);
+    // Keep notch open while interacting; will reset when native-drag-finished or user leaves
+    console.log("[Notch Egress] DOM Drag lifecycle finished.");
   };
 
   const postItem = async (itemType: string, content: string) => {
