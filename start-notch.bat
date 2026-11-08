@@ -10,7 +10,11 @@ if "%ERRORLEVEL%"=="0" (
     echo [1/2] Rust Backend Daemon is already running.
 ) else (
     echo [1/2] Starting Rust Backend Daemon in background...
-    start "" /B "%~dp0src-tauri\target\debug\notch-daemon.exe"
+    if exist "%~dp0src-tauri\target\release\notch-daemon.exe" (
+        start "" /B "%~dp0src-tauri\target\release\notch-daemon.exe"
+    ) else (
+        start "" /B "%~dp0src-tauri\target\debug\notch-daemon.exe"
+    )
     timeout /t 1 /nobreak >nul
 )
 

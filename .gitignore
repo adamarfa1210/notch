@@ -4,6 +4,4 @@ Cargo.lock
 frontend/node_modules
 frontend/dist
 frontend/dist-installer
-testing_dragdrop/folder_awal/*
-testing_dragdrop/test/*
 **/*.rs.bk

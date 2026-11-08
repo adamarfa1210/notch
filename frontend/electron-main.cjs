@@ -218,24 +218,6 @@ function createNotchWindow() {
 
         if (item.item_type === "fileuri") {
           targetFilePath = item.data;
-
-          // Robust resolution for Unicode, emojis, or relative paths:
-          if (!fs.existsSync(targetFilePath)) {
-            const folderAwal = path.resolve(__dirname, "..", "testing_dragdrop", "folder_awal");
-            if (fs.existsSync(folderAwal)) {
-              const files = fs.readdirSync(folderAwal);
-              for (const f of files) {
-                if (
-                  f === item.preview ||
-                  f.normalize("NFC") === item.preview.normalize("NFC") ||
-                  f.includes(item.preview.slice(0, 20))
-                ) {
-                  targetFilePath = path.join(folderAwal, f);
-                  break;
-                }
-              }
-            }
-          }
         } else if (item.item_type === "image") {
           if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
           targetFilePath = path.join(tempDir, `notch_img_${item.id.slice(0, 8)}.png`);

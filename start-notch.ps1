@@ -3,7 +3,9 @@ Write-Host "=====================================================" -ForegroundCo
 Write-Host "  Launching Dynamic RAM Notch (Desktop Native)       " -ForegroundColor Green
 Write-Host "=====================================================" -ForegroundColor Cyan
 
-$backendExe = "$PSScriptRoot\src-tauri\target\debug\notch-daemon.exe"
+$releaseExe = "$PSScriptRoot\src-tauri\target\release\notch-daemon.exe"
+$debugExe = "$PSScriptRoot\src-tauri\target\debug\notch-daemon.exe"
+$backendExe = if (Test-Path $releaseExe) { $releaseExe } else { $debugExe }
 if (-not (Get-Process -Name "notch-daemon" -ErrorAction SilentlyContinue)) {
     Write-Host "[1/2] Starting Rust Backend Daemon..." -ForegroundColor Yellow
     Start-Process -FilePath $backendExe -WindowStyle Hidden
