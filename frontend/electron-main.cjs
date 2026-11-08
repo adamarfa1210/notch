@@ -3,9 +3,22 @@ const path = require("path");
 const fs = require("fs");
 const os = require("os");
 
+// Configure isolated user data directory and disable shader disk cache to avoid Windows access denied errors
+app.setName("DynamicRamNotch");
+const userDataPath = path.join(os.tmpdir(), "dynamic_ram_notch_profile");
+if (!fs.existsSync(userDataPath)) {
+  try {
+    fs.mkdirSync(userDataPath, { recursive: true });
+  } catch {}
+}
+app.setPath("userData", userDataPath);
+app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+app.commandLine.appendSwitch("no-sandbox");
+
 let mainWindow = null;
 let tray = null;
 let selectedDisplayId = null;
+let collapseTimer = null;
 
 function getActiveDisplay() {
   const displays = screen.getAllDisplays();
@@ -88,16 +101,25 @@ function createNotchWindow() {
     if (!mainWindow) return;
 
     if (state === "expanded") {
+      // Instantly cancel any pending collapse timer to eliminate hover fight bug
+      if (collapseTimer) {
+        clearTimeout(collapseTimer);
+        collapseTimer = null;
+      }
       const w = typeof customWidth === "number" ? customWidth : 864;
       const h = typeof customHeight === "number" ? customHeight : 112;
       positionWindow(w, h);
     } else {
-      // Allow Framer Motion animation to shrink inside transparent canvas before tightening OS window bounds
-      setTimeout(() => {
+      if (collapseTimer) {
+        clearTimeout(collapseTimer);
+      }
+      // Allow snappy spring animation (~200ms) to shrink inside canvas before tightening OS window
+      collapseTimer = setTimeout(() => {
         if (mainWindow) {
           positionWindow(180, 30);
         }
-      }, 380);
+        collapseTimer = null;
+      }, 220);
     }
   });
 

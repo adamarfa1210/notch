@@ -44,11 +44,9 @@ export default function App() {
   const [isDraggingOut, setIsDraggingOut] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [isMorphing, setIsMorphing] = useState(false);
   const [items, setItems] = useState<StagedItem[]>([]);
 
-  const leaveTimeoutRef = useRef<any>(null);
-  const morphTimeoutRef = useRef<any>(null);
+  const leaveTimerRef = useRef<any>(null);
 
   // 1. Initial Data Fetch & Polling
   useEffect(() => {
@@ -123,46 +121,30 @@ export default function App() {
     }
   }, [allSlots.length, isExpanded, targetWidth, targetHeight]);
 
-  // 2. Expand / Collapse Window States with Morphing Motion Blur Lifecycle
+  // 2. Expand / Collapse Window States with Clean Debounced Hover Lifecycle
   const expandNotch = () => {
-    if (leaveTimeoutRef.current) {
-      clearTimeout(leaveTimeoutRef.current);
-      leaveTimeoutRef.current = null;
+    if (leaveTimerRef.current) {
+      clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
     }
-    if (morphTimeoutRef.current) clearTimeout(morphTimeoutRef.current);
-
-    setIsMorphing(true);
     setIsExpanded(true);
-
     if (ipcRenderer) {
       ipcRenderer.send("set-notch-state", "expanded", targetWidth, targetHeight);
     }
-
-    morphTimeoutRef.current = setTimeout(() => {
-      setIsMorphing(false);
-    }, 380);
   };
 
   const collapseNotch = (force = false) => {
     if (!force && (isPinned || isDraggingOut)) {
       return;
     }
-    if (leaveTimeoutRef.current) {
-      clearTimeout(leaveTimeoutRef.current);
-      leaveTimeoutRef.current = null;
+    if (leaveTimerRef.current) {
+      clearTimeout(leaveTimerRef.current);
+      leaveTimerRef.current = null;
     }
-    if (morphTimeoutRef.current) clearTimeout(morphTimeoutRef.current);
-
-    setIsMorphing(true);
     setIsExpanded(false);
-
     if (ipcRenderer) {
       ipcRenderer.send("set-notch-state", "collapsed");
     }
-
-    morphTimeoutRef.current = setTimeout(() => {
-      setIsMorphing(false);
-    }, 380);
   };
 
   // 3. Selection Mode Handlers
@@ -196,17 +178,17 @@ export default function App() {
     }
   };
 
-  // 4. Mouse & Drag Handlers
+  // 4. Mouse & Drag Handlers with Debounced Anti-Jitter
   const handleMouseEnter = () => {
     expandNotch();
   };
 
   const handleMouseLeave = () => {
     if (isDraggingOut || isPinned) return;
-    if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current);
-    leaveTimeoutRef.current = setTimeout(() => {
+    if (leaveTimerRef.current) clearTimeout(leaveTimerRef.current);
+    leaveTimerRef.current = setTimeout(() => {
       collapseNotch();
-    }, 280);
+    }, 200);
   };
 
   const handleDragEnter = (e: React.DragEvent) => {
@@ -339,7 +321,7 @@ export default function App() {
             toggleItemSelect(item.id);
           }
         }}
-        className={`w-[76px] ${boxHeight} rounded-lg relative overflow-hidden flex flex-col items-center justify-center transition-all ${
+        className={`w-[76px] ${boxHeight} rounded-lg relative overflow-hidden flex flex-col items-center justify-center transition-all duration-150 ${
           item
             ? isSelected
               ? "border-2 border-sky-400 bg-sky-950/80 shadow-[0_0_12px_rgba(56,189,248,0.4)] cursor-grab active:cursor-grabbing scale-102"
@@ -430,37 +412,24 @@ export default function App() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* Hidden SVG Motion Blur Filter Definition for directional X-blur */}
-      <svg className="fixed pointer-events-none w-0 h-0 overflow-hidden" aria-hidden="true">
-        <defs>
-          <filter id="notch-motion-blur" x="-20%" y="-20%" width="140%" height="140%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="5 0" />
-          </filter>
-        </defs>
-      </svg>
-
-      {/* Dynamic Unified Morphing Notch Box */}
+      {/* Dynamic Unified Morphing Notch Box (Snappy Apple-grade spring, zero artificial blur) */}
       <motion.div
         initial={false}
         animate={{
           width: isExpanded ? targetWidth : 180,
           height: isExpanded ? targetHeight : 30,
-          borderRadius: isExpanded ? "0px 0px 18px 18px" : "0px 0px 14px 14px",
-          boxShadow: isMorphing
-            ? "0 12px 35px rgba(0,0,0,0.9), 0 0 25px rgba(56,189,248,0.45)"
-            : "0 8px 30px rgba(0,0,0,0.8), 0 0 12px rgba(56,189,248,0.2)",
+          borderRadius: isExpanded ? "0px 0px 16px 16px" : "0px 0px 14px 14px",
         }}
         transition={{
           type: "spring",
-          stiffness: 240,
-          damping: 24,
-          mass: 0.85,
+          stiffness: 420,
+          damping: 30,
+          mass: 0.8,
         }}
-        className="relative bg-[#0B0F19] text-white border-x border-b border-sky-500/60 overflow-hidden flex flex-col items-center justify-center cursor-pointer select-none"
+        className="relative bg-[#0B0F19] text-white border-x border-b border-sky-500/50 shadow-2xl overflow-hidden flex flex-col items-center justify-center cursor-pointer select-none"
         style={{
-          willChange: "width, height, transform, filter",
+          willChange: "width, height, transform",
           transform: "translateZ(0)",
-          filter: isMorphing ? "url(#notch-motion-blur)" : "none",
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -468,27 +437,16 @@ export default function App() {
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        {/* Optical Motion Blur Speed Streak Overlay */}
-        {isMorphing && (
-          <motion.div
-            initial={{ opacity: 0.6, scaleX: 0.3 }}
-            animate={{ opacity: [0.6, 0.3, 0], scaleX: [0.3, 1.1, 1.25] }}
-            transition={{ duration: 0.35, ease: "easeOut" }}
-            className="absolute inset-0 pointer-events-none bg-gradient-to-r from-transparent via-sky-400/25 to-transparent blur-sm z-30"
-          />
-        )}
-
         {/* ================= UNIFIED LAYER 1: COLLAPSED PILL VIEW ================= */}
         <motion.div
           initial={false}
           animate={{
             opacity: isExpanded ? 0 : 1,
-            scale: isExpanded ? 0.88 : 1,
-            y: isExpanded ? -8 : 0,
+            scale: isExpanded ? 0.9 : 1,
           }}
           transition={{
-            duration: 0.18,
-            ease: "easeInOut",
+            duration: 0.12,
+            ease: "easeOut",
           }}
           className={`absolute inset-0 flex items-center justify-center gap-2 px-3 py-1 ${
             isExpanded ? "pointer-events-none" : "pointer-events-auto"
@@ -510,12 +468,11 @@ export default function App() {
           initial={false}
           animate={{
             opacity: isExpanded ? 1 : 0,
-            scale: isExpanded ? 1 : 0.95,
-            y: isExpanded ? 0 : 6,
+            scale: isExpanded ? 1 : 0.96,
           }}
           transition={{
-            duration: 0.22,
-            delay: isExpanded ? 0.06 : 0,
+            duration: 0.15,
+            delay: isExpanded ? 0.04 : 0,
             ease: "easeOut",
           }}
           style={{ width: targetWidth, height: targetHeight }}
