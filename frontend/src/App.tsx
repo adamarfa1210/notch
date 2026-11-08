@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import {
   FileText,
   File,
@@ -44,8 +44,11 @@ export default function App() {
   const [isDraggingOut, setIsDraggingOut] = useState(false);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isMorphing, setIsMorphing] = useState(false);
   const [items, setItems] = useState<StagedItem[]>([]);
+
   const leaveTimeoutRef = useRef<any>(null);
+  const morphTimeoutRef = useRef<any>(null);
 
   // 1. Initial Data Fetch & Polling
   useEffect(() => {
@@ -120,16 +123,24 @@ export default function App() {
     }
   }, [allSlots.length, isExpanded, targetWidth, targetHeight]);
 
-  // 2. Expand / Collapse Window States
+  // 2. Expand / Collapse Window States with Morphing Motion Blur Lifecycle
   const expandNotch = () => {
     if (leaveTimeoutRef.current) {
       clearTimeout(leaveTimeoutRef.current);
       leaveTimeoutRef.current = null;
     }
+    if (morphTimeoutRef.current) clearTimeout(morphTimeoutRef.current);
+
+    setIsMorphing(true);
     setIsExpanded(true);
+
     if (ipcRenderer) {
       ipcRenderer.send("set-notch-state", "expanded", targetWidth, targetHeight);
     }
+
+    morphTimeoutRef.current = setTimeout(() => {
+      setIsMorphing(false);
+    }, 380);
   };
 
   const collapseNotch = (force = false) => {
@@ -140,10 +151,18 @@ export default function App() {
       clearTimeout(leaveTimeoutRef.current);
       leaveTimeoutRef.current = null;
     }
+    if (morphTimeoutRef.current) clearTimeout(morphTimeoutRef.current);
+
+    setIsMorphing(true);
     setIsExpanded(false);
+
     if (ipcRenderer) {
       ipcRenderer.send("set-notch-state", "collapsed");
     }
+
+    morphTimeoutRef.current = setTimeout(() => {
+      setIsMorphing(false);
+    }, 380);
   };
 
   // 3. Selection Mode Handlers
@@ -187,7 +206,7 @@ export default function App() {
     if (leaveTimeoutRef.current) clearTimeout(leaveTimeoutRef.current);
     leaveTimeoutRef.current = setTimeout(() => {
       collapseNotch();
-    }, 300);
+    }, 280);
   };
 
   const handleDragEnter = (e: React.DragEvent) => {
@@ -239,7 +258,6 @@ export default function App() {
 
   // 5. Native OLE Drag-Out (Single item or Batch Multi-drag)
   const handleSlotDragStart = (e: React.DragEvent, item: StagedItem) => {
-    // Crucial: preventDefault() stops Chromium's HTML5 text drag from colliding with Windows OLE DoDragDrop
     e.preventDefault();
     setIsDraggingOut(true);
 
@@ -412,160 +430,198 @@ export default function App() {
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      {/* Dynamic Notch Box: animates width & height smoothly with elastic spring bounce */}
+      {/* Hidden SVG Motion Blur Filter Definition for directional X-blur */}
+      <svg className="fixed pointer-events-none w-0 h-0 overflow-hidden" aria-hidden="true">
+        <defs>
+          <filter id="notch-motion-blur" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="5 0" />
+          </filter>
+        </defs>
+      </svg>
+
+      {/* Dynamic Unified Morphing Notch Box */}
       <motion.div
         initial={false}
         animate={{
           width: isExpanded ? targetWidth : 180,
           height: isExpanded ? targetHeight : 30,
-          borderRadius: isExpanded ? "0px 0px 16px 16px" : "0px 0px 14px 14px",
+          borderRadius: isExpanded ? "0px 0px 18px 18px" : "0px 0px 14px 14px",
+          boxShadow: isMorphing
+            ? "0 12px 35px rgba(0,0,0,0.9), 0 0 25px rgba(56,189,248,0.45)"
+            : "0 8px 30px rgba(0,0,0,0.8), 0 0 12px rgba(56,189,248,0.2)",
         }}
         transition={{
           type: "spring",
-          stiffness: 340,
-          damping: 22,
-          mass: 0.8,
+          stiffness: 240,
+          damping: 24,
+          mass: 0.85,
         }}
-        className="bg-[#0B0F19] text-white shadow-2xl border-x border-b border-sky-500/50 overflow-hidden flex flex-col items-center justify-between cursor-pointer"
+        className="relative bg-[#0B0F19] text-white border-x border-b border-sky-500/60 overflow-hidden flex flex-col items-center justify-center cursor-pointer select-none"
+        style={{
+          willChange: "width, height, transform, filter",
+          transform: "translateZ(0)",
+          filter: isMorphing ? "url(#notch-motion-blur)" : "none",
+        }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         onDragEnter={handleDragEnter}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
-        <AnimatePresence initial={false}>
-          {!isExpanded ? (
-            // ================= STATE A: COLLAPSED NOTCH (180x30px) =================
-            <motion.div
-              key="collapsed-content"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.12 }}
-              onClick={expandNotch}
-              className="w-[180px] h-[30px] flex items-center justify-center gap-2 px-3 py-1 bg-black/95 relative"
-            >
-              {/* Active Volatile RAM Indicator LED */}
-              <span className="relative flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-              <span className="text-[11px] font-semibold tracking-wider text-slate-200 uppercase font-mono">
-                RAM NOTCH {items.length > 0 ? `(${items.length}/20)` : ""}
-              </span>
-            </motion.div>
-          ) : (
-            // ================= STATE B: EXPANDED SHELF (Adaptive 1-20 Items) =================
-            <motion.div
-              key="expanded-content"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
-              style={{ width: targetWidth, height: targetHeight }}
-              className="p-2.5 flex flex-col justify-between bg-[#0B0F19]"
-            >
-              {/* Header Status Bar */}
-              <div className="w-full flex items-center justify-between px-1 text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-                {/* Left: Indicator & Buffer Count */}
-                <div className="flex items-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-                  <span>RAM FIFO ({items.length}/20)</span>
-                </div>
+        {/* Optical Motion Blur Speed Streak Overlay */}
+        {isMorphing && (
+          <motion.div
+            initial={{ opacity: 0.6, scaleX: 0.3 }}
+            animate={{ opacity: [0.6, 0.3, 0], scaleX: [0.3, 1.1, 1.25] }}
+            transition={{ duration: 0.35, ease: "easeOut" }}
+            className="absolute inset-0 pointer-events-none bg-gradient-to-r from-transparent via-sky-400/25 to-transparent blur-sm z-30"
+          />
+        )}
 
-                {/* Center / Right: Multi-Select Toolbar & Pin / Clear */}
-                <div className="flex items-center gap-2">
-                  {/* Select Mode Toolbar */}
-                  {items.length > 0 && (
-                    <div className="flex items-center gap-1.5 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-700/60">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleSelectMode();
-                        }}
-                        className={`flex items-center gap-1 text-[10px] font-medium tracking-normal transition-colors px-1 py-0.5 rounded ${
-                          isSelectMode
-                            ? "text-sky-400 font-bold"
-                            : "text-slate-400 hover:text-slate-200"
-                        }`}
-                      >
-                        <ListChecks className="w-3 h-3" />
-                        <span>{isSelectMode ? "DONE" : "SELECT"}</span>
-                      </button>
+        {/* ================= UNIFIED LAYER 1: COLLAPSED PILL VIEW ================= */}
+        <motion.div
+          initial={false}
+          animate={{
+            opacity: isExpanded ? 0 : 1,
+            scale: isExpanded ? 0.88 : 1,
+            y: isExpanded ? -8 : 0,
+          }}
+          transition={{
+            duration: 0.18,
+            ease: "easeInOut",
+          }}
+          className={`absolute inset-0 flex items-center justify-center gap-2 px-3 py-1 ${
+            isExpanded ? "pointer-events-none" : "pointer-events-auto"
+          }`}
+          onClick={expandNotch}
+        >
+          {/* Active Volatile RAM Indicator LED */}
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+          </span>
+          <span className="text-[11px] font-semibold tracking-wider text-slate-200 uppercase font-mono whitespace-nowrap">
+            RAM NOTCH {items.length > 0 ? `(${items.length}/20)` : ""}
+          </span>
+        </motion.div>
 
-                      {isSelectMode && (
-                        <>
-                          <span className="text-slate-600">|</span>
-                          <button
-                            onClick={handleSelectAll}
-                            className="text-[10px] text-sky-400 hover:text-sky-300 underline lowercase font-mono tracking-normal"
-                          >
-                            {selectedIds.size === items.length ? "deselect all" : "select all"}
-                          </button>
-                          <span className="text-[9px] font-mono text-slate-400">
-                            ({selectedIds.size})
-                          </span>
+        {/* ================= UNIFIED LAYER 2: EXPANDED SHELF VIEW ================= */}
+        <motion.div
+          initial={false}
+          animate={{
+            opacity: isExpanded ? 1 : 0,
+            scale: isExpanded ? 1 : 0.95,
+            y: isExpanded ? 0 : 6,
+          }}
+          transition={{
+            duration: 0.22,
+            delay: isExpanded ? 0.06 : 0,
+            ease: "easeOut",
+          }}
+          style={{ width: targetWidth, height: targetHeight }}
+          className={`p-2.5 flex flex-col justify-between ${
+            isExpanded ? "pointer-events-auto" : "pointer-events-none"
+          }`}
+        >
+          {/* Header Status Bar */}
+          <div className="w-full flex items-center justify-between px-1 text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+            {/* Left: Indicator & Buffer Count */}
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
+              <span>RAM FIFO ({items.length}/20)</span>
+            </div>
 
-                          {selectedIds.size > 0 && (
-                            <div
-                              draggable
-                              onDragStart={handleBatchDragStart}
-                              onDragEnd={handleSlotDragEnd}
-                              title="Drag this badge to drop all selected items together"
-                              className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-[9px] cursor-grab active:cursor-grabbing shadow-[0_0_10px_rgba(56,189,248,0.5)] transition-all animate-pulse"
-                            >
-                              <Layers className="w-2.5 h-2.5" />
-                              <span>DRAG ({selectedIds.size})</span>
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Pin Button */}
+            {/* Center / Right: Multi-Select Toolbar & Pin / Clear */}
+            <div className="flex items-center gap-2">
+              {/* Select Mode Toolbar */}
+              {items.length > 0 && (
+                <div className="flex items-center gap-1.5 bg-slate-900/80 px-2 py-0.5 rounded-md border border-slate-700/60">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      setIsPinned(!isPinned);
+                      toggleSelectMode();
                     }}
-                    title={isPinned ? "Unpin Notch" : "Pin Notch Open"}
-                    className={`p-1 rounded transition-colors ${
-                      isPinned
-                        ? "text-sky-400 bg-sky-950/70"
-                        : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                    className={`flex items-center gap-1 text-[10px] font-medium tracking-normal transition-colors px-1 py-0.5 rounded ${
+                      isSelectMode
+                        ? "text-sky-400 font-bold"
+                        : "text-slate-400 hover:text-slate-200"
                     }`}
                   >
-                    <Pin className={`w-3.5 h-3.5 ${isPinned ? "fill-sky-400" : ""}`} />
+                    <ListChecks className="w-3 h-3" />
+                    <span>{isSelectMode ? "DONE" : "SELECT"}</span>
                   </button>
 
-                  {/* Clear Buffer Button */}
-                  {items.length > 0 && (
-                    <button
-                      onClick={handleClearBuffer}
-                      title="Clear Buffer"
-                      className="hover:text-red-400 text-slate-400 transition-colors p-1 rounded hover:bg-slate-800"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  {isSelectMode && (
+                    <>
+                      <span className="text-slate-600">|</span>
+                      <button
+                        onClick={handleSelectAll}
+                        className="text-[10px] text-sky-400 hover:text-sky-300 underline lowercase font-mono tracking-normal"
+                      >
+                        {selectedIds.size === items.length ? "deselect all" : "select all"}
+                      </button>
+                      <span className="text-[9px] font-mono text-slate-400">
+                        ({selectedIds.size})
+                      </span>
+
+                      {selectedIds.size > 0 && (
+                        <div
+                          draggable
+                          onDragStart={handleBatchDragStart}
+                          onDragEnd={handleSlotDragEnd}
+                          title="Drag this badge to drop all selected items together"
+                          className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-[9px] cursor-grab active:cursor-grabbing shadow-[0_0_10px_rgba(56,189,248,0.5)] transition-all animate-pulse"
+                        >
+                          <Layers className="w-2.5 h-2.5" />
+                          <span>DRAG ({selectedIds.size})</span>
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
-              </div>
-
-              {/* Row 1 (Up to 10 Slots) */}
-              <div className="flex items-center justify-center gap-2 w-full mt-1">
-                {row1Slots.map((item, index) => renderSlot(item, index))}
-              </div>
-
-              {/* Row 2 (Slots 11-20, Center-Aligned if Multi-Row) */}
-              {isMultiRow && (
-                <div className="flex items-center justify-center gap-2 w-full mt-2">
-                  {row2Slots.map((item, index) => renderSlot(item, 10 + index))}
-                </div>
               )}
-            </motion.div>
+
+              {/* Pin Button */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsPinned(!isPinned);
+                }}
+                title={isPinned ? "Unpin Notch" : "Pin Notch Open"}
+                className={`p-1 rounded transition-colors ${
+                  isPinned
+                    ? "text-sky-400 bg-sky-950/70"
+                    : "text-slate-400 hover:text-slate-200 hover:bg-slate-800"
+                }`}
+              >
+                <Pin className={`w-3.5 h-3.5 ${isPinned ? "fill-sky-400" : ""}`} />
+              </button>
+
+              {/* Clear Buffer Button */}
+              {items.length > 0 && (
+                <button
+                  onClick={handleClearBuffer}
+                  title="Clear Buffer"
+                  className="hover:text-red-400 text-slate-400 transition-colors p-1 rounded hover:bg-slate-800"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Row 1 (Up to 10 Slots) */}
+          <div className="flex items-center justify-center gap-2 w-full mt-1">
+            {row1Slots.map((item, index) => renderSlot(item, index))}
+          </div>
+
+          {/* Row 2 (Slots 11-20, Center-Aligned if Multi-Row) */}
+          {isMultiRow && (
+            <div className="flex items-center justify-center gap-2 w-full mt-2">
+              {row2Slots.map((item, index) => renderSlot(item, 10 + index))}
+            </div>
           )}
-        </AnimatePresence>
+        </motion.div>
       </motion.div>
     </div>
   );

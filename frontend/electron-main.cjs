@@ -28,6 +28,16 @@ function positionWindow(width, height) {
   const targetX = Math.round(displayX + (displayWidth - width) / 2);
   const targetY = displayY;
 
+  const current = mainWindow.getBounds();
+  if (
+    current.x === targetX &&
+    current.y === targetY &&
+    current.width === width &&
+    current.height === height
+  ) {
+    return;
+  }
+
   mainWindow.setBounds({
     x: targetX,
     y: targetY,
@@ -87,7 +97,7 @@ function createNotchWindow() {
         if (mainWindow) {
           positionWindow(180, 30);
         }
-      }, 260);
+      }, 380);
     }
   });
 
