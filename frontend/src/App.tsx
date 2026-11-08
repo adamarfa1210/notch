@@ -150,9 +150,9 @@ export default function App() {
       onDrop={handleDrop}
     >
       <div
-        className="w-full h-full bg-[#0B0F19] text-white shadow-2xl border-x border-b border-sky-500/40 overflow-hidden flex flex-col items-center justify-between cursor-pointer transition-all duration-200"
+        className="w-full h-full bg-[#0B0F19] text-white shadow-2xl border-x border-b border-sky-500/50 overflow-hidden flex flex-col items-center justify-between cursor-pointer transition-all duration-200"
         style={{
-          borderRadius: isExpanded ? "0px 0px 16px 16px" : "0px 0px 8px 8px",
+          borderRadius: isExpanded ? "0px 0px 16px 16px" : "0px 0px 14px 14px",
         }}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
@@ -162,44 +162,47 @@ export default function App() {
       >
         <AnimatePresence mode="wait">
           {!isExpanded ? (
-            // ================= STATE A: COLLAPSED NOTCH =================
+            // ================= STATE A: COLLAPSED NOTCH (180x30px) =================
             <motion.div
               key="collapsed-content"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.1 }}
-              className="w-full h-full flex items-center justify-center relative bg-black/90"
+              transition={{ duration: 0.12 }}
+              className="w-full h-full flex items-center justify-center gap-2 px-3 py-1 bg-black/95 relative"
             >
               {/* Active Volatile RAM Indicator LED */}
-              <span className="relative flex h-2 w-2">
+              <span className="relative flex h-2.5 w-2.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+              </span>
+              <span className="text-[11px] font-semibold tracking-wider text-slate-200 uppercase font-mono">
+                RAM NOTCH {items.length > 0 ? `(${items.length}/5)` : ""}
               </span>
             </motion.div>
           ) : (
-            // ================= STATE B: EXPANDED SHELF =================
+            // ================= STATE B: EXPANDED SHELF (460x110px) =================
             <motion.div
               key="expanded-content"
               initial={{ opacity: 0, scale: 0.98 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.98 }}
               transition={{ duration: 0.15 }}
-              className="w-full h-full p-2 flex flex-col justify-between bg-[#0B0F19]"
+              className="w-full h-full p-2.5 flex flex-col justify-between bg-[#0B0F19]"
             >
               {/* Header Status Bar */}
-              <div className="w-full flex items-center justify-between px-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+              <div className="w-full flex items-center justify-between px-1 text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
                   <span>RAM FIFO BUFFER ({items.length}/5)</span>
                 </div>
                 {items.length > 0 && (
                   <button
                     onClick={handleClearBuffer}
                     title="Clear Buffer"
-                    className="hover:text-red-400 transition-colors p-0.5 rounded"
+                    className="hover:text-red-400 transition-colors p-1 rounded hover:bg-slate-800"
                   >
-                    <Trash2 className="w-3 h-3" />
+                    <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 )}
               </div>
@@ -209,9 +212,9 @@ export default function App() {
                 {slots.map((item, index) => (
                   <div
                     key={item?.id || `empty-${index}`}
-                    className={`w-[76px] h-[62px] rounded-lg relative overflow-hidden flex flex-col items-center justify-center transition-all ${
+                    className={`w-[80px] h-[66px] rounded-lg relative overflow-hidden flex flex-col items-center justify-center transition-all ${
                       item
-                        ? "bg-slate-800/90 border border-slate-700 hover:border-sky-400/60 shadow-md group"
+                        ? "bg-slate-800/90 border border-slate-700 hover:border-sky-400/80 shadow-md group"
                         : "border border-dashed border-slate-700/60 bg-slate-900/40"
                     }`}
                   >
@@ -220,9 +223,9 @@ export default function App() {
                         {/* Delete Button */}
                         <button
                           onClick={(e) => handleDeleteItem(e, item.id)}
-                          className="absolute top-1 right-1 z-10 w-4 h-4 rounded-full bg-black/60 text-slate-300 hover:text-white hover:bg-red-500/80 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="absolute top-1 right-1 z-10 w-4 h-4 rounded-full bg-black/70 text-slate-300 hover:text-white hover:bg-red-500 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                         >
-                          <X className="w-2.5 h-2.5" />
+                          <X className="w-3 h-3" />
                         </button>
 
                         {/* Slot Content Preview */}
@@ -256,8 +259,8 @@ export default function App() {
                     ) : (
                       // Empty Slot - Active Drop Target
                       <div className="flex flex-col items-center justify-center text-slate-600">
-                        <Plus className="w-3.5 h-3.5 stroke-[1.5]" />
-                        <span className="text-[8px] font-mono mt-0.5 opacity-60">
+                        <Plus className="w-4 h-4 stroke-[1.5]" />
+                        <span className="text-[9px] font-mono mt-0.5 opacity-60">
                           #{index + 1}
                         </span>
                       </div>
