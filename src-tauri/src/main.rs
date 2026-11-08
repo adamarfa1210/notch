@@ -4,6 +4,9 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
+#[global_allocator]
+static GLOBAL: std::alloc::System = std::alloc::System;
+
 const BUFFER_CAPACITY: usize = 5;
 const HTTP_PORT: u16 = 49152;
 const CLIPBOARD_POLL_MS: u64 = 300;

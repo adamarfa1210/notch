@@ -10,6 +10,17 @@ use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
 
+#[cfg(windows)]
+extern "system" {
+    fn GetClipboardSequenceNumber() -> u32;
+    fn IsClipboardFormatAvailable(format: u32) -> i32;
+}
+
+const CF_HDROP: u32 = 15;
+const CF_DIB: u32 = 8;
+const CF_DIBV5: u32 = 17;
+const CF_UNICODETEXT: u32 = 13;
+
 pub type OnUpdateCallback = Arc<dyn Fn() + Send + Sync + 'static>;
 
 pub struct ClipboardMonitor {
@@ -39,41 +50,94 @@ impl ClipboardMonitor {
                 }
             };
 
+            let mut last_seq: u32 = 0;
             let mut last_hash: u64 = 0;
 
             while is_running.load(Ordering::Relaxed) {
-                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    // 1. Try reading text
-                    if let Ok(text) = clipboard.get_text() {
-                        let trimmed = text.trim();
-                        if !trimmed.is_empty() {
-                            let hash = calculate_hash(&trimmed);
+                #[cfg(windows)]
+                {
+                    let seq = unsafe { GetClipboardSequenceNumber() };
+                    if seq != 0 && seq == last_seq {
+                        thread::sleep(Duration::from_millis(poll_interval_ms));
+                        continue;
+                    }
+                    last_seq = seq;
+
+                    let has_files = unsafe { IsClipboardFormatAvailable(CF_HDROP) } != 0;
+                    let has_text = unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT) } != 0;
+                    let has_image = !has_files && (unsafe { IsClipboardFormatAvailable(CF_DIB) != 0 || IsClipboardFormatAvailable(CF_DIBV5) != 0 });
+
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        // 1. Try reading text if text format is available
+                        if has_text {
+                            if let Ok(text) = clipboard.get_text() {
+                                let trimmed = text.trim();
+                                if !trimmed.is_empty() {
+                                    let hash = calculate_hash(&trimmed);
+                                    if hash != last_hash {
+                                        last_hash = hash;
+                                        let id = Uuid::new_v4().to_string();
+                                        buffer.push(StagedItem::new_text(id, trimmed.to_string()));
+                                        if let Some(ref cb) = on_update {
+                                            cb();
+                                        }
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+
+                        // 2. Try reading screenshot/image ONLY if an actual DIB image is available and NOT a copied file
+                        if has_image {
+                            if let Ok(img) = clipboard.get_image() {
+                                let hash = calculate_image_hash(&img);
+                                if hash != last_hash {
+                                    last_hash = hash;
+                                    if let Some(staged) = convert_image_to_staged(img) {
+                                        buffer.push(staged);
+                                        if let Some(ref cb) = on_update {
+                                            cb();
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }));
+                }
+
+                #[cfg(not(windows))]
+                {
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        if let Ok(text) = clipboard.get_text() {
+                            let trimmed = text.trim();
+                            if !trimmed.is_empty() {
+                                let hash = calculate_hash(&trimmed);
+                                if hash != last_hash {
+                                    last_hash = hash;
+                                    let id = Uuid::new_v4().to_string();
+                                    buffer.push(StagedItem::new_text(id, trimmed.to_string()));
+                                    if let Some(ref cb) = on_update {
+                                        cb();
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+
+                        if let Ok(img) = clipboard.get_image() {
+                            let hash = calculate_image_hash(&img);
                             if hash != last_hash {
                                 last_hash = hash;
-                                let id = Uuid::new_v4().to_string();
-                                buffer.push(StagedItem::new_text(id, trimmed.to_string()));
-                                if let Some(ref cb) = on_update {
-                                    cb();
-                                }
-                                return;
-                            }
-                        }
-                    }
-
-                    // 2. Try reading image/screenshot if no text was captured
-                    if let Ok(img) = clipboard.get_image() {
-                        let hash = calculate_image_hash(&img);
-                        if hash != last_hash {
-                            last_hash = hash;
-                            if let Some(staged) = convert_image_to_staged(img) {
-                                buffer.push(staged);
-                                if let Some(ref cb) = on_update {
-                                    cb();
+                                if let Some(staged) = convert_image_to_staged(img) {
+                                    buffer.push(staged);
+                                    if let Some(ref cb) = on_update {
+                                        cb();
+                                    }
                                 }
                             }
                         }
-                    }
-                }));
+                    }));
+                }
 
                 thread::sleep(Duration::from_millis(poll_interval_ms));
             }
