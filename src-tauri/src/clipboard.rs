@@ -42,37 +42,38 @@ impl ClipboardMonitor {
             let mut last_hash: u64 = 0;
 
             while is_running.load(Ordering::Relaxed) {
-                // 1. Try reading text
-                if let Ok(text) = clipboard.get_text() {
-                    let trimmed = text.trim();
-                    if !trimmed.is_empty() {
-                        let hash = calculate_hash(&trimmed);
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    // 1. Try reading text
+                    if let Ok(text) = clipboard.get_text() {
+                        let trimmed = text.trim();
+                        if !trimmed.is_empty() {
+                            let hash = calculate_hash(&trimmed);
+                            if hash != last_hash {
+                                last_hash = hash;
+                                let id = Uuid::new_v4().to_string();
+                                buffer.push(StagedItem::new_text(id, trimmed.to_string()));
+                                if let Some(ref cb) = on_update {
+                                    cb();
+                                }
+                                return;
+                            }
+                        }
+                    }
+
+                    // 2. Try reading image/screenshot if no text was captured
+                    if let Ok(img) = clipboard.get_image() {
+                        let hash = calculate_image_hash(&img);
                         if hash != last_hash {
                             last_hash = hash;
-                            let id = Uuid::new_v4().to_string();
-                            buffer.push(StagedItem::new_text(id, trimmed.to_string()));
-                            if let Some(ref cb) = on_update {
-                                cb();
-                            }
-                            thread::sleep(Duration::from_millis(poll_interval_ms));
-                            continue;
-                        }
-                    }
-                }
-
-                // 2. Try reading image/screenshot if no text was captured
-                if let Ok(img) = clipboard.get_image() {
-                    let hash = calculate_image_hash(&img);
-                    if hash != last_hash {
-                        last_hash = hash;
-                        if let Some(staged) = convert_image_to_staged(img) {
-                            buffer.push(staged);
-                            if let Some(ref cb) = on_update {
-                                cb();
+                            if let Some(staged) = convert_image_to_staged(img) {
+                                buffer.push(staged);
+                                if let Some(ref cb) = on_update {
+                                    cb();
+                                }
                             }
                         }
                     }
-                }
+                }));
 
                 thread::sleep(Duration::from_millis(poll_interval_ms));
             }
@@ -107,6 +108,16 @@ fn calculate_image_hash(img: &ImageData) -> u64 {
 fn convert_image_to_staged(img: ImageData) -> Option<StagedItem> {
     let width = img.width as u32;
     let height = img.height as u32;
+
+    // Safety checks: Reject invalid or huge uncompressed images to avoid OOM
+    if width == 0 || height == 0 || width > 2560 || height > 1600 {
+        return None;
+    }
+
+    let expected_len = (width as usize).saturating_mul(height as usize).saturating_mul(4);
+    if img.bytes.len() != expected_len || img.bytes.len() > 8 * 1024 * 1024 {
+        return None;
+    }
 
     let img_buffer: ImageBuffer<Rgba<u8>, _> =
         ImageBuffer::from_raw(width, height, img.bytes.into_owned())?;

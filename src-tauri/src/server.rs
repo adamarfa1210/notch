@@ -71,11 +71,19 @@ impl LocalHttpServer {
 
                     // 4. Manually post item into buffer (CLI / external push)
                     (&Method::Post, "/api/items") => {
+                        let body_len = request.body_length().unwrap_or(0);
+                        if body_len > 4 * 1024 * 1024 {
+                            let _ = request.respond(json_response(
+                                StatusCode(413),
+                                r#"{"error":"Payload too large (max 4MB)"}"#,
+                            ));
+                            continue;
+                        }
+
                         let mut content = Vec::new();
-                        let body_len = request.body_length();
                         let mut reader = request.as_reader();
-                        if let Some(len) = body_len {
-                            content.resize(len, 0);
+                        if body_len > 0 {
+                            content.resize(body_len, 0);
                             let _ = std::io::Read::read_exact(&mut reader, &mut content);
                         } else {
                             let _ = std::io::Read::read_to_end(&mut reader, &mut content);
